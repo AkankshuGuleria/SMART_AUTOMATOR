@@ -1,0 +1,15 @@
+{
+  // kilo.jsonc — AUTOMATA project configuration for Kilo Code
+  // Tells Kilo Code which rule files to load for every session in this project.
+  "instructions": [
+    ".kilo/rules/00_start_here.md",
+    ".kilo/rules/01_architecture.md",
+    ".kilo/rules/02_code_conventions.md",
+    ".kilo/rules/03_skills_testing.md",
+    ".kilo/rules/04_skills_backend.md",
+    ".kilo/rules/05_skills_frontend.md",
+    ".kilo/rules/06_skills_prompts.md",
+    ".kilo/rules/07_skills_security.md",
+    ".kilo/rules/08_skills_output.md"
+  ]
+}

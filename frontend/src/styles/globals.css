@@ -1,0 +1,401 @@
+/* src/styles/globals.css — AUTOMATA global stylesheet
+ *
+ * Entry point for Tailwind CSS (via @tailwindcss/vite plugin).
+ * Also defines AUTOMATA's design tokens and component-level styles.
+ *
+ * Import this file once in main.tsx:
+ *   import './styles/globals.css'
+ *
+ * Design system:
+ *   - Dark mode by default (matches "sharp, quiet engineering tool" tone from SKILLS.md §6)
+ *   - Color palette: cool dark grays + electric indigo accent
+ *   - Typography: Inter (system stack fallback)
+ *   - Micro-animations: subtle, never distracting
+ */
+
+/* ─── Google Fonts ─────────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@import "tailwindcss";
+
+/* ─── CSS custom properties (design tokens) ────────────────────────────────── */
+:root {
+  /* Background layers */
+  --color-bg-base:     #0d0f14;
+  --color-bg-surface:  #13161e;
+  --color-bg-elevated: #1a1e29;
+  --color-bg-overlay:  #1f2435;
+
+  /* Borders */
+  --color-border:      #2a2f3d;
+  --color-border-soft: #1f2332;
+
+  /* Accent — electric indigo */
+  --color-accent:       #6366f1;
+  --color-accent-hover: #818cf8;
+  --color-accent-muted: rgba(99, 102, 241, 0.15);
+
+  /* Text */
+  --color-text-primary:   #e8eaf0;
+  --color-text-secondary: #9ca3b0;
+  --color-text-tertiary:  #5a6175;
+  --color-text-link:      #818cf8;
+
+  /* Status */
+  --color-success:  #34d399;
+  --color-warning:  #fbbf24;
+  --color-error:    #f87171;
+  --color-info:     #60a5fa;
+
+  /* Spacing / radii */
+  --radius-sm:  4px;
+  --radius-md:  8px;
+  --radius-lg:  12px;
+  --radius-xl:  16px;
+
+  /* Transitions */
+  --transition-fast:   120ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow:   350ms ease;
+}
+
+/* ─── Reset & base ──────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+code, pre, kbd, samp {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.875em;
+}
+
+a {
+  color: var(--color-text-link);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+a:hover { color: var(--color-accent-hover); }
+
+/* ─── Typography ─────────────────────────────────────────────────────────────── */
+h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--color-text-primary);
+  line-height: 1.2;
+}
+h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: 0.5rem;
+}
+p {
+  color: var(--color-text-secondary);
+  line-height: 1.65;
+}
+
+/* ─── Accessibility ─────────────────────────────────────────────────────────── */
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+  border: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+/* ─── Spinner (micro-animation) ─────────────────────────────────────────────── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.automata-spinner {
+  display: inline-block;
+  width: 1rem; height: 1rem;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 600ms linear infinite;
+  vertical-align: middle;
+}
+
+/* ─── Buttons ────────────────────────────────────────────────────────────────── */
+.automata-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1.25rem;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
+  letter-spacing: 0.01em;
+}
+.automata-btn-primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(99,102,241,0.35);
+}
+.automata-btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+.automata-btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ─── States ─────────────────────────────────────────────────────────────────── */
+.automata-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 3rem;
+  color: var(--color-text-tertiary);
+  font-size: 0.875rem;
+}
+
+.automata-error {
+  background: rgba(248,113,113,0.1);
+  border: 1px solid rgba(248,113,113,0.3);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem;
+  color: var(--color-error);
+  font-size: 0.875rem;
+}
+.automata-error-hint {
+  margin-top: 0.5rem;
+  color: var(--color-text-tertiary);
+  font-size: 0.8rem;
+}
+
+.automata-empty {
+  padding: 2rem;
+  text-align: center;
+  color: var(--color-text-tertiary);
+}
+.automata-phase-note {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  opacity: 0.6;
+}
+
+/* ─── Morning Brief ─────────────────────────────────────────────────────────── */
+.automata-morning-brief {
+  max-width: 680px;
+  padding: 2rem;
+}
+.brief-date {
+  font-size: 0.8rem;
+  color: var(--color-text-tertiary);
+  margin-bottom: 1.5rem;
+}
+.brief-stats {
+  display: flex;
+  gap: 1.5rem;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 2rem;
+  padding: 0.75rem 1rem;
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-soft);
+}
+.brief-section {
+  margin-bottom: 1.5rem;
+}
+.brief-section ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.brief-section li {
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+  padding-left: 1rem;
+  position: relative;
+}
+.brief-section li::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  color: var(--color-accent);
+}
+
+/* ─── Restore Workspace ─────────────────────────────────────────────────────── */
+.automata-restore {
+  max-width: 560px;
+  padding: 2rem;
+}
+.restore-steps {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.restore-step {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.875rem;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  border: 1px solid var(--color-border-soft);
+  background: var(--color-bg-elevated);
+  transition: background var(--transition-fast);
+}
+.restore-step--ok      { border-color: rgba(52,211,153,0.3); }
+.restore-step--error   { border-color: rgba(248,113,113,0.3); }
+.restore-step--skipped { opacity: 0.5; }
+
+.step-icon { font-size: 1rem; width: 1.25rem; text-align: center; }
+.restore-step--ok    .step-icon { color: var(--color-success); }
+.restore-step--error .step-icon { color: var(--color-error); }
+
+.step-label  { flex: 1; color: var(--color-text-primary); }
+.step-detail { font-size: 0.75rem; color: var(--color-text-tertiary); }
+
+.restore-overall {
+  margin-top: 1rem;
+  font-size: 0.8rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+}
+.restore-overall--ok      { color: var(--color-success); }
+.restore-overall--partial { color: var(--color-warning); }
+.restore-overall--error   { color: var(--color-error); }
+.restore-overall--skipped { color: var(--color-text-tertiary); }
+
+/* ─── Query Chat ─────────────────────────────────────────────────────────────── */
+.automata-query-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: calc(100vh - 4rem);
+  max-width: 720px;
+  padding: 1.5rem;
+}
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-bottom: 1rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+.chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 3rem 1rem;
+  text-align: center;
+  color: var(--color-text-tertiary);
+}
+.chat-examples {
+  font-size: 0.8rem;
+  max-width: 520px;
+}
+.chat-message {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 85%;
+}
+.chat-message--user  { align-self: flex-end; align-items: flex-end; }
+.chat-message--agent { align-self: flex-start; }
+
+.chat-bubble {
+  padding: 0.625rem 0.875rem;
+  border-radius: var(--radius-lg);
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+.chat-message--user  .chat-bubble {
+  background: var(--color-accent);
+  color: #fff;
+  border-bottom-right-radius: var(--radius-sm);
+}
+.chat-message--agent .chat-bubble {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-soft);
+  border-bottom-left-radius: var(--radius-sm);
+}
+.chat-bubble--loading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-text-tertiary);
+}
+
+.chat-time {
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+  padding: 0 0.25rem;
+}
+.chat-badge {
+  display: inline-block;
+  margin-top: 0.375rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+.chat-badge--grounded { background: rgba(52,211,153,0.15); color: var(--color-success); }
+.chat-badge--stub     { background: rgba(251,191,36,0.15);  color: var(--color-warning); }
+
+.chat-input-row {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border-soft);
+}
+.chat-input {
+  flex: 1;
+  padding: 0.5rem 0.875rem;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 0.875rem;
+  transition: border-color var(--transition-fast);
+}
+.chat-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+.chat-input::placeholder { color: var(--color-text-tertiary); }
+.chat-input:disabled { opacity: 0.5; cursor: not-allowed; }

@@ -1,0 +1,90 @@
+[project]
+name = "automata-backend"
+version = "0.1.0"
+description = "AUTOMATA — Persistent Memory Developer Agent (Python background agent)"
+requires-python = ">=3.12"
+
+dependencies = [
+    # API server
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    # Database — CockroachDB via psycopg2 + SQLAlchemy
+    "sqlalchemy>=2.0.0",
+    "psycopg2-binary>=2.9.0",
+    # File watching (SKILLS.md §4 — background capture without blocking the API)
+    "watchdog>=6.0.0",
+    # Git integration (SKILLS.md §4 — GitPollerThread)
+    "gitpython>=3.1.0",
+    # AWS SDK (Bedrock + S3)
+    "boto3>=1.37.0",
+    # Environment / config
+    "python-dotenv>=1.0.0",
+    # OS-native credential vault — Windows Credential Manager (SKILLS.md §8)
+    "keyring>=25.0.0",
+    # WebSocket support (via fastapi + uvicorn[standard])
+    "websockets>=14.0",
+    # Rich terminal output — better tracebacks for bug-fixing (SKILLS.md §2)
+    "rich>=13.0.0",
+    # Token counting for prompt budget management (SKILLS.md §5)
+    "tiktoken>=0.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    # ── SKILLS.md §1 Testing ──────────────────────────────────────────────────
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",           # coverage reports
+    "pytest-mock>=3.14.0",         # mocker fixture for unit tests
+    "pytest-xdist>=3.6.0",         # parallel test execution (-n auto)
+    "httpx>=0.28.0",               # async test client for FastAPI
+    # ── SKILLS.md §1 — Mock AWS/Bedrock without real API calls ───────────────
+    "moto[s3]>=5.0.0",             # AWS service mocking; mock Bedrock via responses/respx (moto 5.x has no bedrock extra)
+    "respx>=0.21.0",               # mock httpx requests
+    # ── SKILLS.md §1 — Fixtures and fake data ────────────────────────────────
+    "faker>=30.0.0",               # generate realistic test data (commits, file paths, etc.)
+    # ── SKILLS.md §6 §8 — Secret scanning before commits ─────────────────────
+    "detect-secrets>=1.5.0",       # scans for secret-shaped strings in code and diffs
+    # ── SKILLS.md §2 — Linting + formatting ──────────────────────────────────
+    "ruff>=0.9.0",                 # linting + formatting
+    # ── SKILLS.md §8 — Pre-commit hooks for secrets + lint ───────────────────
+    "pre-commit>=4.0.0",           # runs detect-secrets + ruff before every git commit
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# Coverage config (SKILLS.md §1 — don't ship untested code)
+addopts = "--tb=short"
+
+[tool.coverage.run]
+source = ["."]
+omit = ["tests/*", ".venv/*", "*/migrations/*"]
+
+[tool.coverage.report]
+# Fail CI if overall coverage drops below this (raise as project matures)
+fail_under = 0      # set to 70 in Phase 2, 80 in Phase 4
+show_missing = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+select = ["E", "F", "I", "UP", "B", "S"]   # added S = flake8-bandit (security checks)
+ignore = [
+    "S101",  # assert statements are fine in tests
+]
+
+[tool.ruff.per-file-ignores]
+"tests/*" = ["S", "B"]   # relax security/bugbear in test files
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["tests*", "*.tests*", ".venv*"]
+
+# Tell uv this is a flat script collection, not a distributable package.
+[tool.uv]
+package = false

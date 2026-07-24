@@ -1,0 +1,66 @@
+# .gitignore — AUTOMATA
+
+# ─── Python / Backend ─────────────────────────────────────────────────────────
+.env
+.env.local
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# uv — lock file IS committed (reproducible installs); cache is not
+.uv_cache/
+
+# ─── Frontend / Node ──────────────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/build/
+frontend/.vite/
+*.local
+
+# ─── Tauri / Rust ─────────────────────────────────────────────────────────────
+frontend/src-tauri/target/
+Cargo.lock        # Tauri lock — keep if it's the primary Cargo.lock
+
+# ─── Secrets (critical — never commit) ───────────────────────────────────────
+*.pem
+*.key
+*.cert
+*.p12
+credentials.json
+serviceAccount*.json
+
+# ─── OS artifacts ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Editor artifacts ─────────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# ─── Test / Coverage ──────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── Demo / Scratch ───────────────────────────────────────────────────────────
+# demo/ folder itself is tracked (for assets); individual recordings may be large
+demo/*.mp4
+demo/*.mov
+demo/*.webm

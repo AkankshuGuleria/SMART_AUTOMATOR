@@ -1,0 +1,49 @@
+# .pre-commit-config.yaml — AUTOMATA pre-commit hooks
+#
+# Implements SKILLS.md §6 (secret redaction) and §8 (credentials handling).
+# Runs automatically before every git commit.
+#
+# Install hooks:   uv run pre-commit install
+# Run manually:    uv run pre-commit run --all-files
+# Update hooks:    uv run pre-commit autoupdate
+
+repos:
+  # ── SKILLS.md §8 — Secret scanning (never commit real credentials) ─────────
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        name: "detect-secrets: scan for credentials"
+        args: ["--baseline", ".secrets.baseline"]
+        exclude: |
+          (?x)^(
+            backend/\.env\.example|
+            .*\.lock|
+            .*uv\.lock
+          )$
+
+  # ── SKILLS.md §4 §2 — Linting + code quality ─────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.0
+    hooks:
+      - id: ruff
+        name: "ruff: lint Python"
+        args: ["--fix"]
+      - id: ruff-format
+        name: "ruff: format Python"
+
+  # ── General hygiene ────────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        exclude: "kilo.jsonc"
+      - id: check-json
+        exclude: "kilo.jsonc"
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=500"]    # block accidentally committing large binary/demo files
+      - id: no-commit-to-branch
+        args: ["--branch", "main"]   # force PR workflow on main
