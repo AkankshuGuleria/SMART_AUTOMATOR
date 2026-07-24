@@ -272,10 +272,14 @@ Depends On
 
 TASK-011
 
+Status
+
+In Progress
+
 Acceptance
 
 * Commands captured
-* Sensitive data redacted
+* Sensitive data redacted (`redact_secrets()` implemented; capture path still pending)
 * Commands stored
 
 ---

@@ -27,6 +27,7 @@
 - [ ] `credential_refs` table + OS-native vault integration (never store
       real secrets in CockroachDB) — see `SKILLS.md` §8.
 - [ ] Secret redaction pass applied to all capture paths before writes.
+- [x] Secret redaction utility implemented and covered by unit tests.
 - **Milestone check:** can you query CockroachDB directly and see real
   captured activity from a real coding session?
 

@@ -16,9 +16,21 @@ Phase 1: Implement FileWatcherThread, GitPollerThread, TerminalCaptureThread.
 """
 
 import logging
+import re
 import threading
 
 logger = logging.getLogger(__name__)
+
+_SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bghp_[A-Za-z0-9_]{20,}\b"), "ghp_[REDACTED]"),
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AKIA[REDACTED]"),
+    (re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"), "sk-[REDACTED]"),
+    (
+        re.compile(r"(?i)\b(key|token|password)\s*=\s*([^\s;&|]+)"),
+        r"\1=[REDACTED]",
+    ),
+    (re.compile(r"(?i)\bBearer\s+([A-Za-z0-9._~+/=-]+)"), "Bearer [REDACTED]"),
+)
 
 
 class FileWatcherThread(threading.Thread):
@@ -104,5 +116,7 @@ def redact_secrets(text: str) -> str:
              token=<value>, password=<value>, Bearer <token>.
     See SKILLS.md §6, §8.
     """
-    # TODO (Phase 1): implement redaction patterns
-    return text
+    redacted = text
+    for pattern, replacement in _SECRET_PATTERNS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted

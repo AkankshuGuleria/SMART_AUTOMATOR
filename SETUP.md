@@ -46,6 +46,13 @@ Copy-Item .env.example .env
 # NEVER commit .env
 ```
 
+Validate your local setup without printing secret values:
+
+```powershell
+python scripts/check_env.py --phase phase1
+python scripts/check_env.py --phase phase2
+```
+
 ---
 
 ## 4. Backend setup
