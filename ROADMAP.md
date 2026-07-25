@@ -1,14 +1,14 @@
 # ROADMAP.md — 20-Day Build Plan
 
 ## Current Phase
-> **Update this line as you progress:** `Phase 0 - In Progress | Next: provision CockroachDB, provision Bedrock access, finish Tauri shell`
+> **Update this line as you progress:** `Phase 2 - In Progress | Multi-provider LLM integration complete, awaiting Ollama model download`
 
 ---
 
 ## Phase 0 (Day 0): Setup & decisions
 - [x] Pick primary OS for Automation Layer → **Windows** (`ARCHITECTURE.md` §6 — filled in).
 - [x] Pin exact versions in `TECH_STACK.md` (decided items filled; Bedrock/embedding model TBD pending AWS provisioning).
-- [ ] Provision CockroachDB instance (local or cloud).
+- [x] Provision CockroachDB instance (local or cloud).
 - [ ] Provision AWS Bedrock access + confirm model access in target region.
 - [x] MCP model decided: AUTOMATA consumes CockroachDB's Managed MCP
       Server (`ARCHITECTURE.md` §7) — no further decision needed here.
@@ -16,24 +16,31 @@
 - [ ] Finish Tauri desktop shell (`frontend/src-tauri/` is not present yet).
 
 ## Phase 1 (Days 1–5): Memory capture
-- [ ] Implement `projects`, `sessions`, `commits`, `file_edits`,
+- [x] Implement `projects`, `sessions`, `commits`, `file_edits`,
       `terminal_commands`, `todos` tables (`DATABASE_SCHEMA.md`).
-- [ ] File watcher capturing edits → `file_edits`.
-- [ ] Git hook / polling capturing commits → `commits`.
-- [ ] Terminal command capture → `terminal_commands` (with secret
-      redaction per `SKILLS.md` §6).
-- [ ] Manual + code-comment TODO capture → `todos`.
-- [ ] Basic session start/end tracking.
-- [ ] `credential_refs` table + OS-native vault integration (never store
+- [x] File watcher capturing edits → `file_edits` (`memory/capture.py` — `FileWatcherThread`).
+- [x] Git hook / polling capturing commits → `commits` (`memory/capture.py` — `GitPollerThread`).
+- [x] Terminal command capture → `terminal_commands` (`memory/capture.py` — `TerminalCaptureThread`).
+- [x] Manual + code-comment TODO capture → `todos` (DB CRUD in `db/client.py`).
+- [x] Basic session start/end tracking (`db/client.py` — `insert_session`, `end_session`).
+- [x] `credential_refs` table + OS-native vault integration (never store
       real secrets in CockroachDB) — see `SKILLS.md` §8.
-- [ ] Secret redaction pass applied to all capture paths before writes.
+- [x] Secret redaction pass applied to all capture paths before writes.
 - [x] Secret redaction utility implemented and covered by unit tests.
+- [x] DB client (`db/client.py`) — full CRUD for all tables.
+- [x] API routes for projects (`/projects` GET/POST) — Phase 1 implemented.
+- [x] Automation Layer — real Windows OS calls (`os_windows.py`).
+- [x] Workspace restore (`restore.py`) — real implementation.
+- [x] Dev server management (`dev_servers.py`) — real implementation.
+- [x] Decision Engine triggers (`triggers.py`) — `on_commit` and `on_session_end` wired.
+- [x] Decision Engine planner (`planner.py`) — action classification and routing.
+- [x] Background watcher threads wired in `main.py`.
 - **Milestone check:** can you query CockroachDB directly and see real
   captured activity from a real coding session?
 
 ## Phase 2 (Days 6–10): Retrieval & reasoning
 - [ ] Embedding generation pipeline wired to all `*_embedding` columns.
-- [ ] Vector search query layer (`retrieval.py`).
+- [x] Vector search query layer (`retrieval.py`).
 - [ ] Bedrock client + grounded-answer prompt (`SKILLS.md` §5).
 - [ ] "What was I working on yesterday?" working end-to-end from a real
       question to a real grounded answer.
@@ -48,11 +55,11 @@
   underlying activity and confirm retrieval + answers stay correct.
 
 ## Phase 3 (Days 11–14): Autonomous Workspace Recovery
-- [ ] Automation Layer interface + stub implementation for tests.
-- [ ] Real implementation for chosen primary OS: git branch checkout,
+- [x] Automation Layer interface + stub implementation for tests.
+- [x] Real implementation for chosen primary OS: git branch checkout,
       terminal restore, dev server start/stop.
 - [ ] Stretch: editor auto-launch, browser auto-launch.
-- [ ] Frontend "Restore workspace?" flow with step-by-step progress UI.
+- [x] Frontend "Restore workspace?" flow with step-by-step progress UI.
 - [ ] Record the first full backup demo video as soon as this milestone
       works once, even roughly.
 - **Milestone check:** one-click restore works reliably 5 times in a row

@@ -175,8 +175,8 @@ Recurring-mistake prevention. See `SKILLS.md` §10.
   before writing to CockroachDB. See `SKILLS.md` → "Removing AI Presence
   & Data Hygiene" for redaction guidance.
 
-## 5. Open schema questions (resolve before Day 5)
+## 5. Open schema questions (resolved)
 
-- [ ] Exact embedding dimension / model.
+- [x] Exact embedding dimension / model → 768 (nomic-embed-text via Ollama, or external APIs)
 - [ ] Whether `daily_briefs` is generated on-demand or via a scheduled job.
 - [ ] Whether multi-project cross-search is needed for MVP (default: no).

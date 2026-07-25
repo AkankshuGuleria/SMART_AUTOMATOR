@@ -41,8 +41,9 @@ Observe → Store Memory → Reason → Plan → Execute → Update Memory → R
 
 - **Observe** — watches git activity, file edits, terminal commands, TODOs.
 - **Store Memory** — persists structured facts + embeddings to CockroachDB.
-- **Reason** — Amazon Bedrock reasons over retrieved memory, grounded in
-  fact, not free generation.
+- **Reason** — Ollama (free, local) reasons over retrieved memory, grounded in
+   fact, not free generation. Bedrock is available as an alternative when API
+   keys are provided (see `backend/ai/bedrock_client.py`).
 - **Plan** — decides what the developer probably needs next (not just
   what they asked for).
 - **Execute** — takes action: restores a workspace, drafts a commit

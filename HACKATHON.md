@@ -236,7 +236,13 @@ Memory is continuously captured, indexed, retrieved, reasoned upon, and updated,
 
 # AWS Services Used
 
-- ✅ Amazon Bedrock
+- ✅ Amazon Bedrock (optional — uncomment in `backend/ai/bedrock_client.py` when keys are available)
+
+### Free Tier Strategy
+
+- **Ollama** (default) — completely free, local, no API keys, no rate limits
+- **AWS Lambda** — 1M requests/month + 400K GB-seconds/month free tier (if deploying as a service)
+- **Amazon Bedrock** — $200 new-account credits for 6 months (when keys are provided)
 
 ---
 

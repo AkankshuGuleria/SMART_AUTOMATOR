@@ -11,6 +11,7 @@ Autonomous developer agent using **CockroachDB** (persistent memory + vector ind
 
 ## Stack
 - **Backend**: Python 3.12, FastAPI, uv, SQLAlchemy + psycopg2-binary, watchdog, GitPython, keyring, boto3
+- **AI Backend**: Ollama (free, local) — default. Amazon Bedrock (optional) — uncomment in ai/bedrock_client.py when keys are available.
 - **Frontend**: React 19, TypeScript, Vite, Tailwind CSS (`@tailwindcss/vite`), npm
 - **DB**: CockroachDB (tables + Distributed Vector Indexing)
 - **AI**: Amazon Bedrock (reasoning + embeddings)

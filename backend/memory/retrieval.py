@@ -1,21 +1,161 @@
 """
 memory/retrieval.py — AUTOMATA Persistent Memory Engine: vector search retrieval.
-
-Owns:    Querying CockroachDB for relevant memories given a natural-language
-         question or a structured filter. Returns raw memory rows — does not
-         compose an answer (→ ai/bedrock_client.py does that).
+Owns: Querying CockroachDB for relevant memories given a natural-language
+           question or a structured filter. Returns raw memory rows — does not
+           compose an answer (→ ai/bedrock_client.py does that).
 Never:   Must not call Bedrock. Must not execute OS actions.
-         Must not cross project boundaries in a query unless explicitly asked.
 Ref:     ARCHITECTURE.md §5 (retrieval data flow), DATABASE_SCHEMA.md §3.
-
-Phase 0: All functions are stubs returning empty lists.
-Phase 2: Wire to db/client.get_session() + CockroachDB vector search.
 """
 
 import logging
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+_RECENT_TABLES = {
+    "commits": {
+        "columns": "id, project_id, session_id, commit_hash, message, author, committed_at",
+        "timestamp": "committed_at",
+        "content": "message",
+    },
+    "todos": {
+        "columns": "id, project_id, description, status, source, created_at, resolved_at",
+        "timestamp": "created_at",
+        "content": "description",
+    },
+    "file_edits": {
+        "columns": "id, project_id, session_id, file_path, edited_at, change_summary",
+        "timestamp": "edited_at",
+        "content": "change_summary",
+    },
+    "terminal_commands": {
+        "columns": "id, project_id, session_id, command, cwd, exit_code, run_at",
+        "timestamp": "run_at",
+        "content": "command",
+    },
+    "architecture_notes": {
+        "columns": "id, project_id, title, content, updated_at",
+        "timestamp": "updated_at",
+        "content": "content",
+    },
+    "decision_log": {
+        "columns": "id, project_id, decision, rationale, decided_at",
+        "timestamp": "decided_at",
+        "content": "rationale",
+    },
+    "mistake_log": {
+        "columns": "id, project_id, symptom, root_cause, fix, module, occurred_at",
+        "timestamp": "occurred_at",
+        "content": "root_cause",
+    },
+}
+
+_VECTOR_TABLES = {
+    "sessions": {
+        "embedding": "summary_embedding",
+        "timestamp": "started_at",
+        "content": "summary",
+    },
+    "commits": {
+        "embedding": "message_embedding",
+        "timestamp": "committed_at",
+        "content": "message",
+    },
+    "todos": {
+        "embedding": "description_embedding",
+        "timestamp": "created_at",
+        "content": "description",
+    },
+    "architecture_notes": {
+        "embedding": "content_embedding",
+        "timestamp": "updated_at",
+        "content": "content",
+    },
+    "decision_log": {
+        "embedding": "rationale_embedding",
+        "timestamp": "decided_at",
+        "content": "rationale",
+    },
+    "mistake_log": {
+        "embedding": "root_cause_embedding",
+        "timestamp": "occurred_at",
+        "content": "root_cause",
+    },
+}
+
+
+def _format_vector(values: list[float]) -> str:
+    """Return a CockroachDB-compatible vector literal."""
+    return "[" + ",".join(str(float(value)) for value in values) + "]"
+
+
+def _normalize_row(row: dict[str, Any], table: str, score: float | None = None) -> dict[str, Any]:
+    """Shape table-specific rows into the memory structure used by the Reasoning Engine."""
+    meta = _RECENT_TABLES.get(table) or _VECTOR_TABLES.get(table)
+    content_key = meta["content"] if meta else ""
+    timestamp_key = meta["timestamp"] if meta else ""
+
+    content = row.get(content_key)
+    if not content and table == "file_edits":
+        content = f"Edited {row.get('file_path', 'unknown file')}"
+    if not content and table == "decision_log":
+        content = row.get("decision")
+    if not content and table == "mistake_log":
+        content = row.get("symptom")
+
+    memory = {
+        "table": table,
+        "id": str(row.get("id", "")),
+        "content": content or "",
+        "timestamp": row.get(timestamp_key),
+        "raw": row,
+    }
+    if score is not None:
+        memory["score"] = score
+    return memory
+
+
+def retrieve_recent(project_id: str, table: str, limit: int = 10) -> list[dict[str, Any]]:
+    """
+    Return recent memories from one allow-listed table.
+
+    This is the reliable fallback path when vector search or the embedding
+    backend is unavailable. It keeps the API useful in disconnected/local setup
+    mode without bypassing project scoping.
+    """
+    from db.client import get_session
+    from sqlalchemy import text
+
+    if not project_id:
+        logger.warning("retrieve_recent: project_id is required")
+        return []
+
+    if table not in _RECENT_TABLES:
+        logger.warning("retrieve_recent: unsupported table '%s'", table)
+        return []
+
+    meta = _RECENT_TABLES[table]
+    query = (
+        f"SELECT {meta['columns']} FROM {table} "
+        f"WHERE project_id = :project_id "
+        f"ORDER BY {meta['timestamp']} DESC LIMIT :limit"
+    )
+
+    try:
+        with get_session() as session:
+            if session is None:
+                return []
+            result = session.execute(
+                text(query),
+                {"project_id": project_id, "limit": max(1, min(limit, 100))},
+            )
+            return [
+                _normalize_row(dict(row._mapping), table)
+                for row in result.fetchall()
+            ]
+    except Exception as exc:
+        logger.error("retrieve_recent: failed for table %s - %s", table, exc)
+        return []
 
 
 def retrieve_by_vector(
@@ -34,7 +174,7 @@ def retrieve_by_vector(
         query_text:  Natural-language query to embed and search against.
         tables:      List of table names to search (e.g. ['commits', 'todos']).
         project_id:  Scope search to this project. Required unless comparing
-                     across projects (explicitly allowed by the caller).
+                      across projects (explicitly allowed by the caller).
         top_k:       Maximum number of results to return.
         date_from:   Optional ISO-8601 date string for filtering by recency.
         date_to:     Optional ISO-8601 date string for filtering by recency.
@@ -43,39 +183,77 @@ def retrieve_by_vector(
         List of dicts — each dict represents one memory row with at minimum:
         {'table': str, 'id': str, 'content': str, 'timestamp': str, 'score': float}
         Returns [] if DB is unavailable or no results found.
-
-    Phase 2 implementation:
-        1. Embed query_text via memory/embeddings.generate_embedding().
-        2. For each table: execute CockroachDB vector search:
-               SELECT *, embedding <-> $query_vec AS score
-               FROM {table}
-               WHERE project_id = $project_id
-               ORDER BY score
-               LIMIT $top_k
-        3. Merge and re-rank across tables by score.
-        4. Return top_k results.
     """
-    logger.debug(
-        "retrieve_by_vector: Phase 0 stub | query='%s...' tables=%s",
-        query_text[:50],
-        tables,
-    )
-    return []
+    from config import settings
+    from db.client import get_session
+    from ai.bedrock_client import invoke_embedding
+    from sqlalchemy import text
 
+    if not settings.embedding_available:
+        logger.debug("retrieve_by_vector: embedding model not configured — returning empty")
+        return []
 
-def retrieve_recent(
-    project_id: str,
-    table: str,
-    limit: int = 20,
-) -> list[dict[str, Any]]:
-    """
-    Return the most recent rows from a table for a given project, ordered by
-    their primary timestamp column descending.
+    if not project_id:
+        logger.warning("retrieve_by_vector: project_id is required for vector search")
+        return []
 
-    Used for morning brief generation (recent commits, recent file edits)
-    where recency matters more than semantic similarity.
+    # Embed the query text
+    query_embedding = invoke_embedding(query_text)
+    if query_embedding is None:
+        logger.error("retrieve_by_vector: Failed to generate embedding for query")
+        return []
 
-    Phase 2 implementation: simple SELECT ... ORDER BY <timestamp> DESC LIMIT n.
-    """
-    logger.debug("retrieve_recent: Phase 0 stub | project=%s table=%s", project_id, table)
-    return []
+    results = []
+
+    # For each table, execute CockroachDB vector search
+    for table in tables:
+        try:
+            with get_session() as session:
+                if session is None:
+                    continue
+                
+                if table not in _VECTOR_TABLES:
+                    logger.warning(f"retrieve_by_vector: Table {table} has no vector column")
+                    continue
+
+                table_meta = _VECTOR_TABLES[table]
+                embedding_col = table_meta["embedding"]
+                timestamp_col = table_meta["timestamp"]
+                
+                # Build and execute the vector search query
+                query = f"""
+                    SELECT *, {embedding_col} <-> :query_vec AS score
+                    FROM {table}
+                    WHERE project_id = :project_id
+                    AND {embedding_col} IS NOT NULL
+                    {f" AND {timestamp_col} >= :date_from" if date_from else ""}
+                    {f" AND {timestamp_col} <= :date_to" if date_to else ""}
+                    ORDER BY score ASC
+                    LIMIT :top_k
+                """
+                
+                result = session.execute(
+                    text(query),
+                    {
+                        "project_id": project_id,
+                        "query_vec": _format_vector(query_embedding),
+                        "date_from": date_from,
+                        "date_to": date_to,
+                        "top_k": top_k
+                    }
+                )
+                
+                # Convert results to list of dicts
+                for row in result.fetchall():
+                    row_dict = dict(row._mapping)
+                    score = float(row_dict.pop("score", 1.0))
+                    results.append(_normalize_row(row_dict, table, score))
+                    
+        except Exception as exc:
+            logger.error(f"retrieve_by_vector: Failed to query table {table} — {exc}")
+    
+    # Re-rank results by score (lower score = more similar)
+    results.sort(key=lambda x: x.get('score', 1.0))
+    
+    # Return top_k results
+    return results[:top_k]

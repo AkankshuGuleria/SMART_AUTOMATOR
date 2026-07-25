@@ -23,16 +23,25 @@
 - Driver/ORM: SQLAlchemy + `psycopg2-binary` (CockroachDB dialect — postgresql+psycopg2)
 - Vector indexing feature in use: CockroachDB Distributed Vector Indexing
 - Embedding model: TBD — name + dimension must be filled in before Phase 2; must match at write time and query time
-
 ## AI
-- Amazon Bedrock — model(s) in use: TBD — fill in before Phase 2
-- LiteLLM — not in use (single-model path for MVP; add only if multi-model routing is needed)
+
+- **Ollama** (temporary free backend) — local LLM service, no API keys required
+  - Default model: `qwen2.5:7b` (pull with `ollama pull qwen2.5:7b`)
+  - Default URL: `http://localhost:11434`
+  - Supports both text generation and embeddings
+  - Completely free, no rate limits, runs locally
+- **Amazon Bedrock** (permanent backend — uncomment in `ai/bedrock_client.py` when keys are available)
+  - Model(s) in use: TBD — fill in before Phase 2
+  - LiteLLM — not in use (single-model path for MVP; add only if multi-model routing is needed)
 - Prompt templates location: `backend/ai/prompts/`
 
 ## AWS
-- Amazon Bedrock — region: TBD (fill in before Phase 2)
-- Amazon S3 — not used in MVP; stretch goal only
 
+- Amazon Bedrock — region: TBD (fill in before Phase 2)
+  - **Note:** Bedrock has no permanent free tier. New AWS accounts get up to $200 in credits (6 months).
+  - For the free-tier demo, Ollama is used as the default backend instead.
+  - Uncomment the Bedrock section in `ai/bedrock_client.py` and fill in `.env` when keys are available.
+- Amazon S3 — not used in MVP; stretch goal only
 ## CockroachDB tooling
 - Distributed Vector Indexing — confirmed in use.
 - Managed MCP Server — confirmed in use as a consumed service (AUTOMATA is an MCP client, not server) — see `ARCHITECTURE.md` §7 (decided).

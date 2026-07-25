@@ -2,10 +2,10 @@
 automation/os_windows.py — AUTOMATA Automation Layer: Windows OS interface.
 
 Owns:    All Windows-specific OS automation primitives used by restore.py
-         and dev_servers.py. This is the ONLY file that calls Windows APIs
-         directly — all other automation modules call this interface.
+          and dev_servers.py. This is the ONLY file that calls Windows APIs
+          directly — all other automation modules call this interface.
 Never:   Must not write to CockroachDB. Must not call Bedrock.
-         Must not be called from Memory Engine or Reasoning Engine code.
+          Must not be called from Memory Engine or Reasoning Engine code.
 Ref:     ARCHITECTURE.md §3.2c, §6 (Windows primary OS), TECH_STACK.md.
 
 Primary OS: Windows (decided — see ARCHITECTURE.md §6).
@@ -35,8 +35,16 @@ def checkout_git_branch(repo_path: str, branch: str) -> bool:
         repo = git.Repo(repo_path)
         repo.git.checkout(branch)
     """
-    logger.info("os_windows.checkout_git_branch: Phase 0 stub | repo=%s branch=%s", repo_path, branch)
-    return False  # stub — no real checkout
+    try:
+        import git
+
+        repo = git.Repo(repo_path)
+        repo.git.checkout(branch)
+        logger.info("os_windows.checkout_git_branch: success | repo=%s branch=%s", repo_path, branch)
+        return True
+    except Exception as exc:
+        logger.error("os_windows.checkout_git_branch: failed | repo=%s branch=%s error=%s", repo_path, branch, exc)
+        return False
 
 
 def open_terminal(cwd: str = "") -> bool:
@@ -47,8 +55,32 @@ def open_terminal(cwd: str = "") -> bool:
         subprocess.Popen(["wt", "-d", cwd], shell=False)
         Fall back to: subprocess.Popen(["powershell", "-NoExit", "-Command", f"cd '{cwd}'"])
     """
-    logger.info("os_windows.open_terminal: Phase 0 stub | cwd=%s", cwd)
-    return False
+    try:
+        # Try Windows Terminal first
+        subprocess.Popen(
+            ["wt", "-d", cwd],
+            shell=False,
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
+        )
+        logger.info("os_windows.open_terminal: opened Windows Terminal | cwd=%s", cwd)
+        return True
+    except FileNotFoundError:
+        pass  # wt not available, fall through
+    except Exception as exc:
+        logger.warning("os_windows.open_terminal: wt failed — %s", exc)
+
+    try:
+        # Fall back to PowerShell
+        subprocess.Popen(
+            ["powershell", "-NoExit", "-Command", f"cd '{cwd}'"],
+            shell=False,
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
+        )
+        logger.info("os_windows.open_terminal: opened PowerShell | cwd=%s", cwd)
+        return True
+    except Exception as exc:
+        logger.error("os_windows.open_terminal: failed to open terminal | cwd=%s error=%s", cwd, exc)
+        return False
 
 
 def open_terminal_with_command(command: str, cwd: str = "") -> Optional[int]:
@@ -65,11 +97,24 @@ def open_terminal_with_command(command: str, cwd: str = "") -> Optional[int]:
         )
         return proc.pid
     """
-    logger.info(
-        "os_windows.open_terminal_with_command: Phase 0 stub | cmd='%s' cwd=%s",
-        command[:80],
-        cwd,
-    )
+    try:
+        proc = subprocess.Popen(
+            ["wt", "-d", cwd, "powershell", "-NoExit", "-Command", command],
+            shell=False,
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
+        )
+        logger.info(
+            "os_windows.open_terminal_with_command: started | pid=%d cmd='%s' cwd=%s",
+            proc.pid, command[:80], cwd,
+        )
+        return proc.pid
+    except FileNotFoundError:
+        pass  # wt not available
+    except Exception as exc:
+        logger.error(
+            "os_windows.open_terminal_with_command: failed | cmd='%s' cwd=%s error=%s",
+            command[:80], cwd, exc,
+        )
     return None
 
 
@@ -80,8 +125,20 @@ def launch_editor(project_path: str, editor: str = "code") -> bool:
     Phase 3 implementation:
         subprocess.Popen([editor, project_path], shell=False)
     """
-    logger.info("os_windows.launch_editor: Phase 0 stub | editor=%s path=%s", editor, project_path)
-    return False
+    try:
+        subprocess.Popen(
+            [editor, project_path],
+            shell=False,
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
+        )
+        logger.info("os_windows.launch_editor: launched | editor=%s path=%s", editor, project_path)
+        return True
+    except FileNotFoundError:
+        logger.warning("os_windows.launch_editor: editor not found — %s", editor)
+        return False
+    except Exception as exc:
+        logger.error("os_windows.launch_editor: failed | editor=%s path=%s error=%s", editor, project_path, exc)
+        return False
 
 
 def launch_browser(url: str) -> bool:
@@ -91,5 +148,11 @@ def launch_browser(url: str) -> bool:
     Phase 3 implementation:
         import webbrowser; webbrowser.open(url)
     """
-    logger.info("os_windows.launch_browser: Phase 0 stub | url=%s", url)
-    return False
+    try:
+        import webbrowser
+        webbrowser.open(url)
+        logger.info("os_windows.launch_browser: opened | url=%s", url)
+        return True
+    except Exception as exc:
+        logger.error("os_windows.launch_browser: failed | url=%s error=%s", url, exc)
+        return False

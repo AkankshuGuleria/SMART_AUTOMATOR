@@ -7,6 +7,7 @@ credentials, CockroachDB, or AWS access.
 
 from pathlib import Path
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -15,16 +16,16 @@ if str(ROOT) not in sys.path:
 from scripts.check_env import collect_status
 
 
-def test_phase1_reports_missing_db_when_env_absent(tmp_path, monkeypatch) -> None:
-    monkeypatch.delenv("COCKROACHDB_CONNECTION_STRING", raising=False)
-    ok, missing = collect_status("phase1", tmp_path / ".env")
+def test_phase1_reports_missing_db_when_env_absent(tmp_path) -> None:
+    # Use a temp .env file that doesn't exist
+    env_file = tmp_path / ".env"
+    ok, missing = collect_status("phase1", env_file)
     assert "COCKROACHDB_CONNECTION_STRING" in missing
     assert "COCKROACHDB_CONNECTION_STRING" not in ok
     assert "LOG_LEVEL" not in missing
 
 
-def test_phase1_accepts_real_db_value(tmp_path, monkeypatch) -> None:
-    monkeypatch.delenv("COCKROACHDB_CONNECTION_STRING", raising=False)
+def test_phase1_accepts_real_db_value(tmp_path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
         "LOG_LEVEL=INFO\n"
@@ -37,8 +38,7 @@ def test_phase1_accepts_real_db_value(tmp_path, monkeypatch) -> None:
     assert "COCKROACHDB_CONNECTION_STRING" not in missing
 
 
-def test_placeholder_values_are_missing(tmp_path, monkeypatch) -> None:
-    monkeypatch.delenv("COCKROACHDB_CONNECTION_STRING", raising=False)
+def test_placeholder_values_are_missing(tmp_path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
         "COCKROACHDB_CONNECTION_STRING=REPLACE_WITH_COCKROACHDB_CONNECTION_STRING\n",

@@ -22,7 +22,16 @@
   ```
   winget install CockroachLabs.CockroachDB
   ```
-- **AWS account** with Bedrock access enabled in your target region (TBD — see TECH_STACK.md)
+- **Ollama** (free, local LLM backend — no API keys required):
+  ```
+  winget install Ollama.Ollama
+  ```
+  Then pull a model:
+  ```powershell
+  ollama pull qwen2.5:7b
+  ```
+  Ollama runs as a local service at `http://localhost:11434` by default.
+- **AWS account** with Bedrock access enabled in your target region (optional — uncomment Bedrock section in `ai/bedrock_client.py` when keys are available)
 
 ---
 

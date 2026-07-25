@@ -15,7 +15,7 @@ import { getHealth, type HealthStatus } from './lib/api'
 type Screen = 'brief' | 'restore' | 'query'
 
 // Phase 0 demo project ID — replace with real project selection in Phase 1.
-const DEMO_PROJECT_ID = 'demo-project-placeholder'
+const DEMO_PROJECT_ID = '0f90c2f9-0d9a-4787-ab07-8d4699fb4b13'
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('brief')

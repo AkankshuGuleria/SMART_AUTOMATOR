@@ -8,8 +8,7 @@
 --
 -- Notes:
 --   • VECTOR(n) columns require CockroachDB with Distributed Vector Indexing.
---     Replace n with the exact embedding dimension from TECH_STACK.md once decided.
---     Placeholder: 1024 (Amazon Titan Embeddings v2 default) — CHANGE if model differs.
+--     n=768 for nomic-embed-text (Ollama fallback) or 1024 for Bedrock Titan.
 --   • All timestamps are TIMESTAMPTZ (timezone-aware) — never store naive datetimes.
 --   • UUIDs use gen_random_uuid() as the default PK generator.
 
@@ -37,7 +36,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     started_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     ended_at            TIMESTAMPTZ,                            -- NULL until session closes
     summary             TEXT,                                   -- generated end-of-session summary
-    summary_embedding   VECTOR(1024)                            -- embedding of summary (dim TBD)
+    summary_embedding   VECTOR(768)                             -- embedding of summary (nomic-embed-text)
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions (project_id);
@@ -49,7 +48,7 @@ CREATE TABLE IF NOT EXISTS commits (
     session_id          UUID        REFERENCES sessions(id) ON DELETE SET NULL,
     commit_hash         TEXT        NOT NULL,
     message             TEXT        NOT NULL,
-    message_embedding   VECTOR(1024),
+    message_embedding   VECTOR(768),
     author              TEXT        NOT NULL,
     committed_at        TIMESTAMPTZ NOT NULL,
     UNIQUE (project_id, commit_hash)            -- idempotent inserts
@@ -93,7 +92,7 @@ CREATE TABLE IF NOT EXISTS todos (
     id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id              UUID        NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     description             TEXT        NOT NULL,
-    description_embedding   VECTOR(1024),
+    description_embedding   VECTOR(768),
     status                  TEXT        NOT NULL DEFAULT 'pending'
                                         CHECK (status IN ('pending', 'in_progress', 'done')),
     source                  TEXT        NOT NULL
@@ -111,7 +110,7 @@ CREATE TABLE IF NOT EXISTS architecture_notes (
     project_id          UUID        NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     title               TEXT        NOT NULL,
     content             TEXT        NOT NULL,
-    content_embedding   VECTOR(1024),
+    content_embedding   VECTOR(768),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -139,7 +138,7 @@ CREATE TABLE IF NOT EXISTS taste_preferences (
     developer_id            UUID        NOT NULL,   -- scope: developer across all projects
     category                TEXT        NOT NULL,   -- e.g. 'naming_convention', 'commit_style'
     description             TEXT        NOT NULL,
-    description_embedding   VECTOR(1024),
+    description_embedding   VECTOR(768),
     confidence              FLOAT       NOT NULL DEFAULT 0.0
                                         CHECK (confidence >= 0.0 AND confidence <= 1.0),
     evidence_count          INT         NOT NULL DEFAULT 1,
@@ -167,7 +166,7 @@ CREATE TABLE IF NOT EXISTS decision_log (
     project_id              UUID        REFERENCES projects(id) ON DELETE SET NULL, -- nullable
     decision                TEXT        NOT NULL,
     rationale               TEXT        NOT NULL,   -- 2–5 sentences: alternatives + reasoning
-    rationale_embedding     VECTOR(1024),
+    rationale_embedding     VECTOR(768),
     decided_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -179,7 +178,7 @@ CREATE TABLE IF NOT EXISTS mistake_log (
     symptom                 TEXT        NOT NULL,
     root_cause              TEXT        NOT NULL,
     fix                     TEXT        NOT NULL,
-    root_cause_embedding    VECTOR(1024),
+    root_cause_embedding    VECTOR(768),
     module                  TEXT,           -- e.g. 'memory_manager', 'automation_layer'
     occurred_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );

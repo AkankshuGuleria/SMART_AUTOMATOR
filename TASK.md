@@ -154,7 +154,7 @@ Connect CockroachDB
 
 ### Status
 
-⬜ Pending
+✅ Completed
 
 ### Depends On
 
@@ -172,9 +172,17 @@ TASK-004
 
 Create database schema
 
+Status
+
+✅ Completed
+
 Depends On
 
 TASK-005
+
+Files
+
+backend/db/schema.sql
 
 Acceptance
 
@@ -188,9 +196,17 @@ Acceptance
 
 Implement database client
 
+Status
+
+✅ Completed
+
 Depends On
 
 TASK-006
+
+Files
+
+backend/db/client.py
 
 Acceptance
 
@@ -204,9 +220,17 @@ Acceptance
 
 Implement project tracking
 
+Status
+
+✅ Completed
+
 Depends On
 
 TASK-007
+
+Files
+
+backend/db/client.py, backend/api/server.py
 
 Acceptance
 
@@ -220,9 +244,17 @@ Acceptance
 
 Implement session tracking
 
+Status
+
+✅ Completed
+
 Depends On
 
 TASK-008
+
+Files
+
+backend/db/client.py
 
 Acceptance
 
@@ -236,9 +268,17 @@ Acceptance
 
 Implement file watcher
 
+Status
+
+✅ Completed
+
 Depends On
 
 TASK-009
+
+Files
+
+backend/memory/capture.py
 
 Acceptance
 
@@ -252,9 +292,17 @@ Acceptance
 
 Implement Git monitoring
 
+Status
+
+✅ Completed
+
 Depends On
 
 TASK-010
+
+Files
+
+backend/memory/capture.py
 
 Acceptance
 
@@ -268,13 +316,17 @@ Acceptance
 
 Implement terminal capture
 
+Status
+
+✅ Completed
+
 Depends On
 
 TASK-011
 
-Status
+Files
 
-In Progress
+backend/memory/capture.py
 
 Acceptance
 
@@ -288,9 +340,17 @@ Acceptance
 
 Implement TODO extraction
 
+Status
+
+✅ Completed
+
 Depends On
 
 TASK-012
+
+Files
+
+backend/db/client.py
 
 Acceptance
 
@@ -304,9 +364,17 @@ Acceptance
 
 Implement architecture notes
 
+Status
+
+✅ Completed
+
 Depends On
 
 TASK-013
+
+Files
+
+backend/db/client.py
 
 Acceptance
 
@@ -323,11 +391,38 @@ Acceptance
 
 Embedding generation pipeline
 
+### Status
+
+✅ Completed
+
+### Files
+
+backend/ai/bedrock_client.py
+
+### Acceptance Criteria
+
+* Embedding calls wired through invoke_embedding() (Done)
+* Multiple provider support (Groq, Gemini, NVIDIA, Minimax, Ollama) (Done)
+* Fallback chain implemented (Done)
+
 ---
 
 ## TASK-016
 
 Vector storage
+
+### Status
+
+✅ Completed
+
+### Files
+
+backend/db/client.py, backend/db/schema.sql
+
+### Acceptance Criteria
+
+* All tables have *_embedding columns (Done)
+* Embedding generation called on insert (Done)
 
 ---
 
@@ -335,11 +430,37 @@ Vector storage
 
 Vector retrieval
 
+### Status
+
+✅ Completed
+
+### Files
+
+backend/memory/retrieval.py
+
+### Acceptance Criteria
+
+* retrieve_by_vector() implemented (Done)
+* CockroachDB ANN search working (Done)
+
 ---
 
 ## TASK-018
 
 Semantic search
+
+### Status
+
+✅ Completed
+
+### Files
+
+backend/ai/bedrock_client.py, backend/memory/retrieval.py
+
+### Acceptance Criteria
+
+* Natural language queries work (Done)
+* Results ranked by similarity (Done)
 
 ---
 
@@ -347,13 +468,35 @@ Semantic search
 
 Memory ranking
 
+### Status
+
+✅ Completed
+
+### Files
+
+backend/memory/retrieval.py
+
+### Acceptance Criteria
+
+* Results sorted by score (Done)
+
 ---
 
 ## TASK-020
 
 Natural language memory queries
 
----
+### Status
+
+✅ Completed
+
+### Files
+
+backend/memory/retrieval.py
+
+### Acceptance Criteria
+
+* Query text embedded and searched (Done)
 
 # Phase 3 — Reasoning Engine
 
@@ -363,11 +506,37 @@ Natural language memory queries
 
 Amazon Bedrock integration
 
+### Status
+
+✅ Completed
+
+### Files
+
+backend/ai/bedrock_client.py
+
+### Acceptance Criteria
+
+* _invoke_bedrock_chat implemented (Done)
+* invoke_reasoning uses Bedrock as primary (Done)
+
 ---
 
 ## TASK-022
 
 Prompt management
+
+### Status
+
+✅ Completed
+
+### Files
+
+backend/ai/bedrock_client.py
+
+### Acceptance Criteria
+
+* _build_grounded_prompt implemented (Done)
+* Memories included in prompts (Done)
 
 ---
 
@@ -375,11 +544,37 @@ Prompt management
 
 Grounded response generation
 
+### Status
+
+✅ Completed
+
+### Files
+
+backend/ai/bedrock_client.py
+
+### Acceptance Criteria
+
+* invoke_reasoning returns grounded answers (Done)
+* Retrieval integrated with reasoning (Done)
+
 ---
 
 ## TASK-024
 
 Morning Brief generation
+
+### Status
+
+🟨 In Progress
+
+### Files
+
+backend/ai/bedrock_client.py, frontend/src/screens/MorningBrief.tsx
+
+### Acceptance Criteria
+
+* Brief prompt template (pending)
+* Frontend displays brief (Done)
 
 ---
 
@@ -387,7 +582,18 @@ Morning Brief generation
 
 Next-task suggestion
 
----
+### Status
+
+🟨 In Progress
+
+### Files
+
+backend/ai/bedrock_client.py
+
+### Acceptance Criteria
+
+* Next-task prompt template (pending)
+* TODO-based suggestions (partially done)
 
 # Phase 4 — Automation Layer
 
@@ -397,11 +603,37 @@ Next-task suggestion
 
 Workspace detection
 
+### Status
+
+✅ Completed
+
+### Files
+
+backend/automation/restore.py
+
+### Acceptance Criteria
+
+* Project info retrieved (Done)
+* Repo path determined (Done)
+
 ---
 
 ## TASK-027
 
 Git restoration
+
+### Status
+
+✅ Completed
+
+### Files
+
+backend/automation/restore.py, backend/automation/os_windows.py
+
+### Acceptance Criteria
+
+* Git branch checkout works (Done)
+* Uses GitPython for repo access (Done)
 
 ---
 
@@ -409,11 +641,36 @@ Git restoration
 
 Terminal restoration
 
+### Status
+
+✅ Completed
+
+### Files
+
+backend/automation/restore.py, backend/automation/os_windows.py
+
+### Acceptance Criteria
+
+* Terminal opens to repo path (Done)
+
 ---
 
 ## TASK-029
 
 Development server startup
+
+### Status
+
+🟨 In Progress
+
+### Files
+
+backend/automation/dev_servers.py
+
+### Acceptance Criteria
+
+* Server config schema ready (Done)
+* Start/stop endpoints (pending)
 
 ---
 
@@ -421,11 +678,36 @@ Development server startup
 
 Editor launch
 
+### Status
+
+✅ Completed
+
+### Files
+
+backend/automation/restore.py, backend/automation/os_windows.py
+
+### Acceptance Criteria
+
+* VS Code launch implemented (Done)
+
 ---
 
 ## TASK-031
 
 Browser launch
+
+### Status
+
+🟨 In Progress
+
+### Files
+
+backend/automation/restore.py, backend/automation/os_windows.py
+
+### Acceptance Criteria
+
+* Launch browser endpoint exists (Done)
+* URL configuration (pending)
 
 ---
 
@@ -433,7 +715,17 @@ Browser launch
 
 Complete workspace recovery
 
----
+### Status
+
+🟨 In Progress
+
+### Files
+
+backend/automation/restore.py
+
+### Acceptance Criteria
+
+* All steps integrated (partially done)
 
 # Phase 5 — Decision Engine
 

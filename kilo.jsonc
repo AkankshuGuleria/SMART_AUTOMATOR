@@ -1,4 +1,5 @@
 {
+  "$schema": "https://app.kilo.ai/config.json",
   // kilo.jsonc — AUTOMATA project configuration for Kilo Code
   // Tells Kilo Code which rule files to load for every session in this project.
   "instructions": [
