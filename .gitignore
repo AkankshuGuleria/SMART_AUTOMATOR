@@ -18,6 +18,10 @@ build/
 
 # uv — lock file IS committed (reproducible installs); cache is not
 .uv_cache/
+.tools/
+/uv.exe
+/uvx.exe
+/uvw.exe
 
 # ─── Frontend / Node ──────────────────────────────────────────────────────────
 node_modules/
@@ -64,3 +68,4 @@ logs/
 demo/*.mp4
 demo/*.mov
 demo/*.webm
+project_uuid.txt

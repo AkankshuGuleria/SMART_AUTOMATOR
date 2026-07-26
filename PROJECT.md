@@ -136,6 +136,8 @@ a proposed next step.
    project summary, regenerates the daily brief, flags related unfinished
    TODOs, stores the resulting memory, and surfaces a suggested next task.
    This is what makes AUTOMATA autonomous rather than reactive-only.
+6. **Global Floating Companion & Cross-App Autonomous Execution** — system-wide overlay companion window accessible over any application via hotkey (e.g. `Alt+Space`). Capable of executing multi-step tasks across other desktop applications (IDE, browser, terminal, external tools, web creation) in the background while the developer works elsewhere.
+
 
 ## 9. Autonomous Decision Engine (the one feature that makes this "autonomous")
 

@@ -73,7 +73,11 @@
       query) — grounded in file/commit memory, not live code search,
       unless code search is explicitly added as a supplementary source.
 - [ ] "Start development environment" command wired to Automation Layer.
+- [ ] Global Floating Companion Overlay (Tauri global shortcut `Alt+Space` to overlay over VSCode, Browser, Terminal, etc.).
+- [ ] Cross-App Task Execution Engine (asynchronous background execution for building web apps, executing OS actions, and driving tools across other applications).
+
 - **Milestone check:** each command works from a natural-language phrasing
+
   a judge might actually use, not just the exact scripted phrase.
 
 ## Phase 4.5 (Days 18–19): Autonomous Decision Engine

@@ -22,6 +22,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Optional
+
 from watchdog.events import FileSystemEventHandler
 
 logger = logging.getLogger(__name__)
@@ -88,8 +89,8 @@ class FileWatcherThread(threading.Thread):
             return
 
         try:
-            from watchdog.observers import Observer
             from watchdog.events import FileSystemEventHandler
+            from watchdog.observers import Observer
         except ImportError:
             logger.error("FileWatcherThread: watchdog not installed — cannot watch files")
             return

@@ -1,6 +1,8 @@
 import logging
-from db.client import get_session
+
 from sqlalchemy import text
+
+from db.client import get_session
 
 logging.basicConfig(level=logging.INFO)
 

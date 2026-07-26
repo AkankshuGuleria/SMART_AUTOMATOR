@@ -10,12 +10,13 @@ import { useState, useEffect } from 'react'
 import { MorningBriefScreen } from './screens/MorningBrief'
 import { RestoreWorkspaceScreen } from './screens/RestoreWorkspace'
 import { QueryChatScreen } from './screens/QueryChat'
+import { ExplainRepositoryScreen } from './screens/ExplainRepository'
 import { getHealth, type HealthStatus } from './lib/api'
 
-type Screen = 'brief' | 'restore' | 'query'
+type Screen = 'brief' | 'restore' | 'query' | 'explain'
 
-// Phase 0 demo project ID — replace with real project selection in Phase 1.
-const DEMO_PROJECT_ID = '0f90c2f9-0d9a-4787-ab07-8d4699fb4b13'
+// Phase 4 demo project — actual AUTOMATA project with architecture notes
+const DEMO_PROJECT_ID = '2efec7e0-92db-4591-9594-026ff8399a3c'
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('brief')
@@ -28,9 +29,10 @@ export default function App() {
   }, [])
 
   const navItems: { id: Screen; label: string }[] = [
-    { id: 'brief',   label: 'Morning Brief' },
-    { id: 'restore', label: 'Restore Workspace' },
-    { id: 'query',   label: 'Memory Query' },
+    { id: 'brief',    label: 'Morning Brief' },
+    { id: 'restore',  label: 'Restore Workspace' },
+    { id: 'query',    label: 'Memory Query' },
+    { id: 'explain',  label: 'Explain Repository' },
   ]
 
   return (
@@ -112,9 +114,10 @@ export default function App() {
 
       {/* ── Screen ─────────────────────────────────────────────────────────── */}
       <main style={{ flex: 1, overflow: 'auto', padding: '1rem' }}>
-        {screen === 'brief'   && <MorningBriefScreen    projectId={DEMO_PROJECT_ID} />}
-        {screen === 'restore' && <RestoreWorkspaceScreen projectId={DEMO_PROJECT_ID} />}
-        {screen === 'query'   && <QueryChatScreen        projectId={DEMO_PROJECT_ID} />}
+        {screen === 'brief'    && <MorningBriefScreen    projectId={DEMO_PROJECT_ID} />}
+        {screen === 'restore'  && <RestoreWorkspaceScreen projectId={DEMO_PROJECT_ID} />}
+        {screen === 'query'    && <QueryChatScreen        projectId={DEMO_PROJECT_ID} />}
+        {screen === 'explain'  && <ExplainRepositoryScreen projectId={DEMO_PROJECT_ID} repoPath="D:\\AUTOMATA" />}
       </main>
     </div>
   )

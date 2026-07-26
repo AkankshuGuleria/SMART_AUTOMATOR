@@ -24,6 +24,7 @@ import uvicorn
 
 from config import settings
 
+
 def _start_background_watchers() -> None:
     """
     Launch background daemon threads for the Persistent Memory Engine capture pipeline.
@@ -42,9 +43,9 @@ def _start_background_watchers() -> None:
     # File watcher — watches project files for changes
     if settings.db_available:
         fw = FileWatcherThread(
-            project_id="0f90c2f9-0d9a-4787-ab07-8d4699fb4b13",  # Set when a project is registered
-            project_path="D:/AUTOMATA",  # Set when a project is registered
-            session_id=None,  # Set when a session is active
+            project_id="2efec7e0-92db-4591-9594-026ff8399a3c",
+            project_path="D:/AUTOMATA",
+            session_id=None,
             daemon=True,
         )
         threads.append(fw)
@@ -52,17 +53,17 @@ def _start_background_watchers() -> None:
     # Git poller — polls for new commits
     if settings.db_available:
         gp = GitPollerThread(
-            project_id="0f90c2f9-0d9a-4787-ab07-8d4699fb4b13",  # Set when a project is registered
-            project_path="D:/AUTOMATA",  # Set when a project is registered
-            session_id=None,  # Set when a session is active
+            project_id="2efec7e0-92db-4591-9594-026ff8399a3c",
+            project_path="D:/AUTOMATA",
+            session_id=None,
             daemon=True,
         )
         threads.append(gp)
     
     # Terminal capture — captures PowerShell history
     tc = TerminalCaptureThread(
-        project_id="0f90c2f9-0d9a-4787-ab07-8d4699fb4b13",  # Set when a session is active
-        session_id=None,  # Set when a session is active
+        project_id="2efec7e0-92db-4591-9594-026ff8399a3c",
+        session_id=None,
         daemon=True,
     )
     threads.append(tc)

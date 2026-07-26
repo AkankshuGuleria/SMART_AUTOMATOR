@@ -59,6 +59,16 @@ export interface QueryResult {
   grounded: boolean;
 }
 
+export interface ExplainRepositoryResult {
+  project_id: string;
+  repo_path: string;
+  readme_summary: string;
+  folder_structure: Record<string, unknown>[];
+  architecture_notes: Record<string, unknown>[];
+  explanation: string | null;
+  error: string | null;
+}
+
 // ─── WebSocket event types ─────────────────────────────────────────────────────
 
 export type AgentEventType =
@@ -131,6 +141,14 @@ export async function queryMemory(
   return apiFetch<QueryResult>("/query", {
     method: "POST",
     body: JSON.stringify({ question, project_id: projectId }),
+  });
+}
+
+/** Ask the agent to explain the repository structure grounded in README/folder/architecture notes. */
+export async function explainRepository(projectId: string, repoPath: string): Promise<ExplainRepositoryResult> {
+  return apiFetch<ExplainRepositoryResult>("/explain-repository", {
+    method: "POST",
+    body: JSON.stringify({ project_id: projectId, repo_path: repoPath }),
   });
 }
 

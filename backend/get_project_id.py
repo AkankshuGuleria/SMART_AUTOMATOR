@@ -5,8 +5,10 @@ Owns:   Helper script to fetch a real project ID.
 Never:  Does not modify the DB, only reads.
 Ref:    DATABASE_SCHEMA.md §23 (projects table), ARCHITECTURE.md §3.2.
 """
-from db.client import get_session
 from sqlalchemy import text
+
+from db.client import get_session
+
 
 def main():
     with get_session() as session:

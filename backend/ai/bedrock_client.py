@@ -305,9 +305,10 @@ def _invoke_groq_embedding(api_key: str, text: str) -> Optional[list[float]]:
 # ─── Bedrock Configuration ──────────────────────────────────────────────
 def _invoke_bedrock_chat(system_prompt: str, user_message: str, retrieved_memories: list[dict] | None = None) -> Optional[str]:
     """Call Amazon Bedrock to generate a grounded response."""
-    from config import settings
     import json
     import urllib.request
+
+    from config import settings
     try:
         payload = json.dumps({
             "messages": [{"role": "user", "content": [{"text": user_message}]}],

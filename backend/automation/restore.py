@@ -20,9 +20,9 @@ from typing import Any
 
 from automation.os_windows import (
     checkout_git_branch,
-    open_terminal,
-    launch_editor,
     launch_browser,
+    launch_editor,
+    open_terminal,
 )
 from db.client import get_active_session, get_project
 

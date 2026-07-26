@@ -22,9 +22,9 @@ from contextlib import contextmanager
 from typing import Generator, Optional
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.dialects.postgresql.base import PGDialect
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session, sessionmaker
 
 from config import settings
 
@@ -124,8 +124,9 @@ def health_check() -> dict:
 
 def insert_project(name: str, repo_path: str, remote_url: Optional[str] = None) -> Optional[str]:
     """Insert a new project. Returns the project UUID or None on failure."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -148,8 +149,9 @@ def insert_project(name: str, repo_path: str, remote_url: Optional[str] = None) 
 
 def get_projects() -> list[dict]:
     """Return all projects."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -164,8 +166,9 @@ def get_projects() -> list[dict]:
 
 def get_project(project_id: str) -> Optional[dict]:
     """Return a single project by ID."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -186,8 +189,9 @@ def get_project(project_id: str) -> Optional[dict]:
 
 def insert_session(project_id: str) -> Optional[str]:
     """Start a new session for a project. Returns the session UUID or None."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -209,8 +213,9 @@ def insert_session(project_id: str) -> Optional[str]:
 
 def end_session(session_id: str, summary: Optional[str] = None) -> bool:
     """End a session by setting ended_at and optionally a summary."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -231,8 +236,9 @@ def end_session(session_id: str, summary: Optional[str] = None) -> bool:
 
 def get_active_session(project_id: str) -> Optional[dict]:
     """Return the currently active (not ended) session for a project."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -263,8 +269,9 @@ def insert_commit(
     committed_at: str,
 ) -> bool:
     """Insert a commit. Returns True on success, False on duplicate or failure."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -293,8 +300,9 @@ def insert_commit(
 
 def get_commits(project_id: str, limit: int = 20) -> list[dict]:
     """Return recent commits for a project."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -323,8 +331,9 @@ def insert_file_edit(
     change_summary: Optional[str] = None,
 ) -> bool:
     """Insert a file edit record."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -350,8 +359,9 @@ def insert_file_edit(
 
 def get_file_edits(project_id: str, limit: int = 20) -> list[dict]:
     """Return recent file edits for a project."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -381,8 +391,9 @@ def insert_terminal_command(
     exit_code: Optional[int] = None,
 ) -> bool:
     """Insert a terminal command record."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -410,8 +421,9 @@ def insert_terminal_command(
 
 def get_terminal_commands(project_id: str, limit: int = 20) -> list[dict]:
     """Return recent terminal commands for a project."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -440,8 +452,9 @@ def insert_todo(
     status: str = "pending",
 ) -> Optional[str]:
     """Insert a TODO. Returns the TODO UUID or None on failure."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -469,8 +482,9 @@ def insert_todo(
 
 def get_todos(project_id: str, status: Optional[str] = None) -> list[dict]:
     """Return TODOs for a project, optionally filtered by status."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -502,8 +516,9 @@ def get_todos(project_id: str, status: Optional[str] = None) -> list[dict]:
 
 def update_todo_status(todo_id: str, status: str) -> bool:
     """Update a TODO's status."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -530,8 +545,9 @@ def insert_architecture_note(
     content: str,
 ) -> Optional[str]:
     """Insert an architecture note. Returns the note UUID or None on failure."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -554,8 +570,9 @@ def insert_architecture_note(
 
 def get_architecture_notes(project_id: str) -> list[dict]:
     """Return architecture notes for a project."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -586,8 +603,9 @@ def upsert_daily_brief(
     last_edited_file: Optional[str] = None,
 ) -> bool:
     """Insert or update a daily brief for a project."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -622,8 +640,9 @@ def upsert_daily_brief(
 
 def get_daily_brief(project_id: str, brief_date: Optional[str] = None) -> Optional[dict]:
     """Get the daily brief for a project (defaults to today)."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -663,8 +682,9 @@ def insert_taste_preference(
     evidence_count: int = 1,
 ) -> Optional[str]:
     """Insert a taste preference. Returns the preference UUID or None on failure."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -694,8 +714,9 @@ def insert_taste_preference(
 
 def get_taste_preferences(developer_id: str) -> list[dict]:
     """Return taste preferences for a developer."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -724,8 +745,9 @@ def insert_credential_ref(
     expires_at: Optional[str] = None,
 ) -> Optional[str]:
     """Insert a credential reference (never the actual secret value)."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -753,8 +775,9 @@ def insert_credential_ref(
 
 def get_credential_refs(project_id: Optional[str] = None) -> list[dict]:
     """Return credential references, optionally scoped to a project."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -790,8 +813,9 @@ def insert_decision(
     rationale: str,
 ) -> Optional[str]:
     """Insert a decision log entry. Returns the decision UUID or None on failure."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -814,8 +838,9 @@ def insert_decision(
 
 def get_decisions(project_id: Optional[str] = None, limit: int = 20) -> list[dict]:
     """Return decision log entries."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -854,8 +879,9 @@ def insert_mistake(
     module: Optional[str] = None,
 ) -> Optional[str]:
     """Insert a mistake log entry. Returns the mistake UUID or None on failure."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:
@@ -885,8 +911,9 @@ def insert_mistake(
 
 def get_mistakes(project_id: str) -> list[dict]:
     """Return mistake log entries for a project."""
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     with get_session() as session:
         if session is None:

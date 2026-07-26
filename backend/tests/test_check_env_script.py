@@ -5,9 +5,9 @@ These tests validate environment readiness logic without requiring real
 credentials, CockroachDB, or AWS access.
 """
 
-from pathlib import Path
 import sys
 import tempfile
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:

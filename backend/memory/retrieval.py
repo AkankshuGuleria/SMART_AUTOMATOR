@@ -123,8 +123,9 @@ def retrieve_recent(project_id: str, table: str, limit: int = 10) -> list[dict[s
     backend is unavailable. It keeps the API useful in disconnected/local setup
     mode without bypassing project scoping.
     """
-    from db.client import get_session
     from sqlalchemy import text
+
+    from db.client import get_session
 
     if not project_id:
         logger.warning("retrieve_recent: project_id is required")
@@ -184,10 +185,11 @@ def retrieve_by_vector(
         {'table': str, 'id': str, 'content': str, 'timestamp': str, 'score': float}
         Returns [] if DB is unavailable or no results found.
     """
+    from sqlalchemy import text
+
+    from ai.bedrock_client import invoke_embedding
     from config import settings
     from db.client import get_session
-    from ai.bedrock_client import invoke_embedding
-    from sqlalchemy import text
 
     if not settings.embedding_available:
         logger.debug("retrieve_by_vector: embedding model not configured — returning empty")

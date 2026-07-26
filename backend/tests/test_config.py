@@ -11,9 +11,9 @@ These tests must NOT require a real DB or Bedrock connection — they test
 config loading only. See SKILLS.md §1 (unit tests must not make live network calls).
 """
 
+import importlib
 import os
 import sys
-import importlib
 
 import pytest
 

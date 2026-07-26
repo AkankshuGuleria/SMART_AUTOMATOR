@@ -10,7 +10,6 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-
 _ENV_KEYS = (
     "COCKROACHDB_CONNECTION_STRING",
     "AWS_REGION",

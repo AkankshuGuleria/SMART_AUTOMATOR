@@ -84,7 +84,7 @@ async def get_morning_brief(project_id: str) -> dict:
     Full brief generation is still Phase 2 work; this route is useful today
     because it exposes the stored memory that will feed that generation step.
     """
-    from db.client import get_daily_brief, get_commits, get_file_edits, get_todos
+    from db.client import get_commits, get_daily_brief, get_file_edits, get_todos
 
     brief = get_daily_brief(project_id)
     commits = get_commits(project_id, limit=5)
@@ -114,6 +114,41 @@ async def restore_workspace(project_id: str) -> dict:
     from automation.restore import restore_workspace as _restore
 
     return _restore(project_id=project_id)
+
+
+@app.post("/explain-repository", tags=["memory"])
+async def explain_repository_route(body: dict) -> dict:
+    """
+    Ground an explanation of the project's repository structure in README content,
+    live folder structure, and stored architecture notes.
+
+    Returns a structured explanation payload plus the raw context used.
+    """
+    project_id = body.get("project_id")
+    repo_path = body.get("repo_path", "")
+
+    if not project_id or not repo_path:
+        return {
+            "project_id": project_id,
+            "repo_path": repo_path,
+            "readme_summary": "",
+            "folder_structure": [],
+            "architecture_notes": [],
+            "explanation": None,
+            "error": "project_id and repo_path are required",
+        }
+
+    from explain_repository import synthesize_explanation
+    from memory.retrieval import retrieve_recent
+
+    recent = retrieve_recent(project_id, "commits", limit=5)
+    recent.extend(retrieve_recent(project_id, "file_edits", limit=5))
+    recent.extend(retrieve_recent(project_id, "todos", limit=5))
+
+    result = synthesize_explanation(project_id, repo_path, recent_memories=recent)
+    if result is None:
+        result = synthesize_explanation(project_id, repo_path)
+    return result
 
 
 @app.post("/query", tags=["memory"])

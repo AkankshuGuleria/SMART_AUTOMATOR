@@ -188,13 +188,9 @@ Three responsibilities, three internal modules:
   as generated, not presented as recalled fact.
 
 **c) Automation Layer** (code: `backend/automation/`)
-- Executes OS-level actions: launch/close terminal, checkout git branch,
-  start/stop dev servers, optionally launch editor/browser.
-- Isolated behind a small internal API (e.g. `restore_workspace()`,
-  `start_dev_servers()`, `open_editor()`) so it can be mocked/stubbed for
-  testing without touching the real OS.
-- Built against ONE primary OS first (see §5). Cross-platform support is
-  a stretch goal, not a dependency for the core memory story.
+- Executes OS-level & cross-app actions: launch/close terminal, checkout git branch, start/stop dev servers, launch/control external applications (editors, web browsers, background tool jobs).
+- Isolated behind an extensible API (`restore_workspace()`, `start_dev_servers()`, `open_editor()`, `execute_cross_app_task()`) so it can be mocked/stubbed for testing without touching the real OS.
+- Built against ONE primary OS first (Windows). Cross-platform support is a stretch goal, not a dependency for the core memory story.
 
 ### 3.3 CockroachDB — persistent memory store
 - System of record for all project memory.
@@ -211,6 +207,14 @@ Three responsibilities, three internal modules:
 ### 3.5 Amazon S3 (optional)
 - Only if screenshots/logs need persistent binary storage. Not required
   for the core memory/retrieval story — treat as a stretch feature.
+
+### 3.6 Global Floating Companion & Cross-App Execution Controller (Tauri Shell)
+- Provides a global floating overlay companion window accessible over any active application (VSCode, Browser, Terminal, Figma, etc.) via global hotkey (`Alt+Space`).
+- Allows the user to send prompts and tasks to AUTOMATA while working inside any application.
+- Orchestrates multi-step background tool execution and cross-app operations (e.g. creating full websites/apps, running scripts, manipulating external app states).
+- Communicates asynchronously with the Python Background Agent via REST/WebSockets with persistent progress notifications in the floating companion bar.
+
+
 
 ## 4. Data flow — capture path
 
