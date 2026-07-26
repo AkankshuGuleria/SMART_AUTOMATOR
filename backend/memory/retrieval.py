@@ -8,7 +8,7 @@ Ref:     ARCHITECTURE.md §5 (retrieval data flow), DATABASE_SCHEMA.md §3.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +137,7 @@ def retrieve_recent(project_id: str, table: str, limit: int = 10) -> list[dict[s
 
     meta = _RECENT_TABLES[table]
     query = (
-        f"SELECT {meta['columns']} FROM {table} "
+        f"SELECT {meta['columns']} FROM {table} "  # noqa: S608 — table validated against _RECENT_TABLES allowlist
         f"WHERE project_id = :project_id "
         f"ORDER BY {meta['timestamp']} DESC LIMIT :limit"
     )
@@ -162,10 +162,10 @@ def retrieve_recent(project_id: str, table: str, limit: int = 10) -> list[dict[s
 def retrieve_by_vector(
     query_text: str,
     tables: list[str],
-    project_id: Optional[str] = None,
+    project_id: str | None = None,
     top_k: int = 10,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Run a vector similarity search across the specified table(s) and return
@@ -223,6 +223,7 @@ def retrieve_by_vector(
                 timestamp_col = table_meta["timestamp"]
                 
                 # Build and execute the vector search query
+                # noqa: S608 — table/cols validated against _VECTOR_TABLES allowlist
                 query = f"""
                     SELECT *, {embedding_col} <-> :query_vec AS score
                     FROM {table}
@@ -252,7 +253,7 @@ def retrieve_by_vector(
                     results.append(_normalize_row(row_dict, table, score))
                     
         except Exception as exc:
-            logger.error(f"retrieve_by_vector: Failed to query table {table} — {exc}")
+            logger.error("retrieve_by_vector: failed for table %s — %s", table, exc)
     
     # Re-rank results by score (lower score = more similar)
     results.sort(key=lambda x: x.get('score', 1.0))

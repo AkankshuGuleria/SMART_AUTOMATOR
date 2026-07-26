@@ -157,14 +157,30 @@ loop, so behavior stays consistent and auditable.
 ## 3. Components
 
 ### 3.1 Frontend — React + Tauri desktop app
-- Renders the morning brief, chat/query interface, restore button, and
-  status indicators.
-- Talks to the Python Background Agent over a local IPC/HTTP channel
-  (Tauri sidecar process or localhost API — decide and record the choice
-  in `TECH_STACK.md`).
+- Entrypoint is chat-first: persistent chat bar is the primary input surface.
+- Left panel shows live project cards with last activity, branches, and brief status.
+- Right panel/thread renders assistant replies with inline action cards and provenance.
+- Command palette (`Cmd/Ctrl+K`) provides direct access to resume, brief, activity, and tools.
+- Talks to the Python Background Agent over a local IPC/HTTP channel.
 - No business logic lives here. It is a thin presentation layer.
 
-### 3.2 Python Background Agent — the core
+### 3.2 Intent Parser + Command Router
+- Chat messages are parsed into structured intents before execution.
+- Routes to project actions, system commands, or general chat without requiring a selected project.
+- Keeps the same suggest-vs-execute safety model as the Decision Engine.
+
+### 3.3 Command Executor
+- Executes system commands with provenance logging.
+- Enforces execution policy per command category: reversible commands may auto-execute; environment-changing commands require confirmation.
+- Every execution logs why it ran, who requested it, and an undo hint when available.
+
+### 3.4 External Agent Bridge
+- Optional integrations with external AI/coding tools (e.g., Claude, Cursor, Antigravity).
+- Each tool is independently connectable and independently failable.
+- Falls back gracefully: if a design/code generation tool is unavailable, the conversation continues instead of aborting.
+- All delegated prompts and results are logged to `decision_log` for auditability.
+
+### 3.5 Python Background Agent — the core
 Three responsibilities, three internal modules:
 
 **a) Persistent Memory Engine** (code: `backend/memory/`)

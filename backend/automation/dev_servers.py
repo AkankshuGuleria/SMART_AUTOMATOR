@@ -14,7 +14,6 @@ Phase 3: Implement using subprocess + os_windows.py for process management.
 """
 
 import logging
-import subprocess
 from typing import Any
 
 from automation.os_windows import open_terminal_with_command
@@ -57,7 +56,12 @@ def start_dev_servers(project_id: str, server_configs: list[dict] | None = None)
         port = config.get("port")
 
         if not command:
-            results.append({"name": name, "status": "error", "pid": None, "detail": "No command configured"})
+            results.append({
+                "name": name,
+                "status": "error",
+                "pid": None,
+                "detail": "No command configured",
+            })
             continue
 
         # Build the command with port if specified
@@ -71,7 +75,12 @@ def start_dev_servers(project_id: str, server_configs: list[dict] | None = None)
                 results.append({"name": name, "status": "started", "pid": pid})
                 logger.info("start_dev_servers: started | name=%s pid=%d", name, pid)
             else:
-                results.append({"name": name, "status": "error", "pid": None, "detail": "Failed to launch terminal"})
+                results.append({
+                    "name": name,
+                    "status": "error",
+                    "pid": None,
+                    "detail": "Failed to launch terminal",
+                })
         except Exception as exc:
             results.append({"name": name, "status": "error", "pid": None, "detail": str(exc)})
             logger.error("start_dev_servers: error starting %s — %s", name, exc)
@@ -82,7 +91,10 @@ def start_dev_servers(project_id: str, server_configs: list[dict] | None = None)
         for r in results
     ]
 
-    return {"servers": results, "status": "ok" if all(r["status"] == "started" for r in results) else "partial"}
+    return {
+        "servers": results,
+        "status": "ok" if all(r["status"] == "started" for r in results) else "partial",
+    }
 
 
 def stop_dev_servers(project_id: str) -> dict[str, Any]:
@@ -105,12 +117,20 @@ def stop_dev_servers(project_id: str) -> dict[str, Any]:
             import os
             import signal
             os.kill(pid, signal.SIGTERM)
-            results.append({"name": name, "status": "ok", "detail": f"Sent SIGTERM to PID {pid}"})
+            results.append({
+                "name": name,
+                "status": "ok",
+                "detail": f"Sent SIGTERM to PID {pid}",
+            })
             logger.info("stop_dev_servers: stopped | name=%s pid=%d", name, pid)
         except ProcessLookupError:
             results.append({"name": name, "status": "ok", "detail": "Process already terminated"})
         except PermissionError:
-            results.append({"name": name, "status": "error", "detail": "Permission denied — cannot stop process"})
+            results.append({
+                "name": name,
+                "status": "error",
+                "detail": "Permission denied — cannot stop process",
+            })
         except Exception as exc:
             results.append({"name": name, "status": "error", "detail": str(exc)})
             logger.error("stop_dev_servers: error stopping %s — %s", name, exc)
@@ -118,7 +138,10 @@ def stop_dev_servers(project_id: str) -> dict[str, Any]:
     # Clear tracked servers for this project
     _running_servers.pop(project_id, None)
 
-    return {"servers": results, "status": "ok" if all(r["status"] == "ok" for r in results) else "partial"}
+    return {
+        "servers": results,
+        "status": "ok" if all(r["status"] == "ok" for r in results) else "partial",
+    }
 
 
 def _get_default_server_configs(project_id: str) -> list[dict]:

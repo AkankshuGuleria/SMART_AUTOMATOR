@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:with-backend": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/dev-with-backend.ps1",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",

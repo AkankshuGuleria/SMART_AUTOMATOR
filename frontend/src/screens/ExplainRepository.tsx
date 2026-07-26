@@ -56,7 +56,7 @@ export const ExplainRepositoryScreen: React.FC<ExplainRepositoryProps> = ({ proj
         <div className="automata-error" style={{ marginTop: "1.5rem" }} role="alert">
           <p>Could not explain repository: {error}</p>
           <p className="automata-error-hint">
-            Ensure the AUTOMATA agent is running at http://127.0.0.1:8000
+            Ensure the AUTOMATA agent backend is running.
           </p>
         </div>
       )}
@@ -78,12 +78,12 @@ export const ExplainRepositoryScreen: React.FC<ExplainRepositoryProps> = ({ proj
             {result.folder_structure.length === 0 && <p>No structure captured.</p>}
             <div className="explain-tree">
               {result.folder_structure
-                .filter((entry: Record<string, unknown>) => entry.notable)
+                .filter((entry) => entry.notable)
                 .slice(0, 60)
-                .map((entry: Record<string, unknown>, idx: number) => (
+                .map((entry, idx) => (
                   <div key={idx} className="explain-tree-row" style={{ padding: "0.2rem 0.4rem" }}>
                     <span style={{ color: "var(--color-accent)" }}>{entry.type === "dir" ? "📁" : "📄"}</span>
-                    <code style={{ marginLeft: "0.5rem", fontSize: "0.8rem" }}>{String(entry.path)}</code>
+                    <code style={{ marginLeft: "0.5rem", fontSize: "0.8rem" }}>{entry.path}</code>
                   </div>
                 ))}
             </div>
@@ -92,10 +92,10 @@ export const ExplainRepositoryScreen: React.FC<ExplainRepositoryProps> = ({ proj
           <div className="explain-card">
             <h2>Architecture Notes</h2>
             {result.architecture_notes.length === 0 && <p>No architecture notes stored yet.</p>}
-            {result.architecture_notes.map((note: Record<string, unknown>, idx: number) => (
+            {result.architecture_notes.map((note, idx) => (
               <div key={idx} style={{ marginBottom: "0.75rem", padding: "0.75rem", background: "var(--color-bg-elevated)", borderRadius: "var(--radius-md)", border: "1px solid var(--color-border-soft)" }}>
-                <strong style={{ color: "var(--color-text-primary)" }}>{String(note.title ?? "(untitled)")}</strong>
-                <p style={{ marginTop: "0.35rem", fontSize: "0.875rem", color: "var(--color-text-secondary)" }}>{String(note.content ?? "")}</p>
+                <strong style={{ color: "var(--color-text-primary)" }}>{note.title}</strong>
+                <p style={{ marginTop: "0.35rem", fontSize: "0.875rem", color: "var(--color-text-secondary)" }}>{note.content}</p>
               </div>
             ))}
           </div>

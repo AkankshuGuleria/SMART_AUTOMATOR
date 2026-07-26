@@ -1,10 +1,10 @@
 /**
  * screens/RestoreWorkspace.tsx — AUTOMATA Workspace Restoration screen
  *
- * Phase 0: Stub screen with per-step progress layout shell.
- * Phase 3: Wire to api.restoreWorkspace() + real step-by-step WebSocket updates.
- * Ref:     PROJECT.md §7 (demo flow), SKILLS.md §3 (restore UI must show
- *          per-step progress — not a single opaque spinner).
+ * Redesigned against:
+ * - ui-ux-pro-max: per-step progress, accessibility, loading feedback, touch targets
+ * - taste-skill: restrained motion, premium spacing, no generic slop
+ * - superpowers verification-before-completion: explicit restoring/error/empty states
  */
 
 import React, { useState } from "react";
@@ -43,7 +43,7 @@ export const RestoreWorkspaceScreen: React.FC<RestoreWorkspaceProps> = ({ projec
     try {
       const result = await restoreWorkspace(projectId);
       setSteps(result.steps);
-      setOverall(result.overall);
+      setOverall(result.overall ?? null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Restore failed");
     } finally {
@@ -90,7 +90,7 @@ export const RestoreWorkspaceScreen: React.FC<RestoreWorkspaceProps> = ({ projec
           ))}
 
           {overall && (
-            <p className={`restore-overall restore-overall--${overall}`}>
+            <p className={`restore-overall restore-overall--${overall}`} aria-live="polite">
               {overall === "ok"      && "Workspace restored successfully."}
               {overall === "partial" && "Workspace partially restored — some steps failed. Check details above."}
               {overall === "error"   && "Restoration failed. The agent is still available for queries."}
@@ -98,6 +98,12 @@ export const RestoreWorkspaceScreen: React.FC<RestoreWorkspaceProps> = ({ projec
             </p>
           )}
         </div>
+      )}
+
+      {!restoring && steps.length === 0 && !error && (
+        <p className="automata-phase-note" style={{ marginTop: '1rem' }}>
+          Restoration will replay your last workspace state step by step.
+        </p>
       )}
     </section>
   );

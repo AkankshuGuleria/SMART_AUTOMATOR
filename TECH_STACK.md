@@ -7,8 +7,10 @@
 - React — version: 19
 - Tauri — version: 2.x
 - Tailwind CSS — version: latest (via `@tailwindcss/vite` Vite plugin)
-- State management: TBD — must be decided before Phase 3 (RestoreWorkspace UI gains live data)
+- State management: React `useState`/`useEffect` for now; revisit before Phase 3
 - Frontend ↔ Python Agent transport: FastAPI + WebSocket over localhost HTTP
+- Command palette: custom overlay (`Cmd/Ctrl+K`) with project, brief, activity, and tool shortcuts
+- Chat-first UI: persistent chat bar + project cards + inline action cards
 
 ## Core Agent
 - Python — version: 3.12
@@ -17,6 +19,12 @@
 - File watching library: `watchdog`
 - Git integration: `GitPython`
 - Credential vault: `keyring` (OS-native — Windows Credential Manager on the primary OS, per `SKILLS.md` §8)
+
+## Chat & Automation Integrations
+- Intent parser: `backend/decision_engine/intent_parser.py` — lightweight NLU intent routing for chat-first entrypoint
+- Command executor: `backend/automation/command_executor.py` — system command execution with provenance, undo hints, and suggest-vs-execute policy
+- External agent bridge: `backend/automation/agent_bridge.py` — optional integrations with external AI/coding tools (Claude, Cursor, Antigravity). Each tool is checked independently; unavailable tools fail gracefully without breaking the core loop.
+- All external prompts and results are logged to `decision_log` for auditability.
 
 ## Database
 - CockroachDB — version: (fill in once provisioned — confirm it supports Distributed Vector Indexing)

@@ -12,7 +12,6 @@ Ref:     ARCHITECTURE.md §3.4, §3.2b, TECH_STACK.md "AI".
 """
 
 import logging
-from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +25,6 @@ LLM_MAX_RETRIES = 3
 OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_MODEL = "qwen2.5:7b"
 OLLAMA_EMBEDDING_MODEL = "nomic-embed-text"
-OLLAMA_EMBEDDING_MODEL = "nomic-embed-text"
 
 
 def _get_ollama_available() -> bool:
@@ -37,12 +35,12 @@ def _get_ollama_available() -> bool:
         with urllib.request.urlopen(req, timeout=2) as resp:
             if resp.status == 200:
                 return True
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Ollama health check failed — %s", exc)
     return False
 
 
-def _invoke_ollama_chat(system_prompt: str, user_message: str) -> Optional[str]:
+def _invoke_ollama_chat(system_prompt: str, user_message: str) -> str | None:
     """Call Ollama for text generation."""
     import json
     import urllib.request
@@ -73,7 +71,7 @@ def _invoke_ollama_chat(system_prompt: str, user_message: str) -> Optional[str]:
     return None
 
 
-def _invoke_ollama_embedding(text: str) -> Optional[list[float]]:
+def _invoke_ollama_embedding(text: str) -> list[float] | None:
     """Call Ollama for embedding generation."""
     import json
     import urllib.request
@@ -104,7 +102,7 @@ def _invoke_ollama_embedding(text: str) -> Optional[list[float]]:
 
 
 # ─── Gemini API Configuration ───────────────────────────────────────────
-def _invoke_gemini_chat(api_key: str, system_prompt: str, user_message: str) -> Optional[str]:
+def _invoke_gemini_chat(api_key: str, system_prompt: str, user_message: str) -> str | None:
     """Call Gemini API for text generation."""
     import json
     import urllib.request
@@ -135,7 +133,7 @@ def _invoke_gemini_chat(api_key: str, system_prompt: str, user_message: str) -> 
     return None
 
 
-def _invoke_gemini_embedding(api_key: str, text: str) -> Optional[list[float]]:
+def _invoke_gemini_embedding(api_key: str, text: str) -> list[float] | None:
     """Call Gemini API for embedding generation."""
     import json
     import urllib.request
@@ -163,7 +161,7 @@ def _invoke_gemini_embedding(api_key: str, text: str) -> Optional[list[float]]:
 
 
 # ─── Minimax API Configuration ────────────────────────────────────────
-def _invoke_minimax_chat(api_key: str, system_prompt: str, user_message: str) -> Optional[str]:
+def _invoke_minimax_chat(api_key: str, system_prompt: str, user_message: str) -> str | None:
     """Call Minimax API for text generation."""
     import json
     import urllib.request
@@ -199,7 +197,7 @@ def _invoke_minimax_chat(api_key: str, system_prompt: str, user_message: str) ->
 
 
 # ─── NVIDIA API Configuration ───────────────────────────────────────────
-def _invoke_nvidia_chat(api_key: str, system_prompt: str, user_message: str) -> Optional[str]:
+def _invoke_nvidia_chat(api_key: str, system_prompt: str, user_message: str) -> str | None:
     """Call NVIDIA API for text generation (Minimax model via NVIDIA endpoint)."""
     import json
     import urllib.request
@@ -237,7 +235,7 @@ def _invoke_nvidia_chat(api_key: str, system_prompt: str, user_message: str) -> 
 
 
 # ─── Groq API Configuration ──────────────────────────────────────────────
-def _invoke_groq_chat(api_key: str, system_prompt: str, user_message: str) -> Optional[str]:
+def _invoke_groq_chat(api_key: str, system_prompt: str, user_message: str) -> str | None:
     """Call Groq API for text generation."""
     import json
     import urllib.request
@@ -272,7 +270,7 @@ def _invoke_groq_chat(api_key: str, system_prompt: str, user_message: str) -> Op
     return None
 
 
-def _invoke_groq_embedding(api_key: str, text: str) -> Optional[list[float]]:
+def _invoke_groq_embedding(api_key: str, text: str) -> list[float] | None:
     """Call Groq API for embedding generation."""
     import json
     import urllib.request
@@ -303,7 +301,11 @@ def _invoke_groq_embedding(api_key: str, text: str) -> Optional[list[float]]:
 
 
 # ─── Bedrock Configuration ──────────────────────────────────────────────
-def _invoke_bedrock_chat(system_prompt: str, user_message: str, retrieved_memories: list[dict] | None = None) -> Optional[str]:
+def _invoke_bedrock_chat(
+    system_prompt: str,
+    user_message: str,
+    retrieved_memories: list[dict] | None = None,
+) -> str | None:
     """Call Amazon Bedrock to generate a grounded response."""
     import json
     import urllib.request
@@ -322,14 +324,20 @@ def _invoke_bedrock_chat(system_prompt: str, user_message: str, retrieved_memori
             data=payload,
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"AWS4-HMAC-SHA256 Credential={settings.aws_access_key_id}",
+                "Authorization": f"AWS4-HMAC-SHA256 Credential={settings.aws_access_key_id}/{date}/{settings.aws_region}/bedrock/aws4_request",
             },
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
             if resp.status == 200:
                 body = json.loads(resp.read().decode("utf-8"))
-                return body.get("output", {}).get("message", {}).get("content", [{}])[0].get("text", "")
+                content = (
+                    body.get("output", {})
+                    .get("message", {})
+                    .get("content", [{}])[0]
+                    .get("text", "")
+                )
+                return content
     except Exception as exc:
         logger.warning("Bedrock chat call failed — %s", exc)
     return None
@@ -339,7 +347,7 @@ def invoke_reasoning(
     system_prompt: str,
     user_message: str,
     retrieved_memories: list[dict] | None = None,
-) -> Optional[str]:
+) -> str | None:
     """Generate a grounded response using the configured LLM backend."""
     from config import settings
 
@@ -347,49 +355,67 @@ def invoke_reasoning(
 
     # Try Bedrock first (if configured)
     if settings.bedrock_available:
+        logger.info("LLM fallback: trying Bedrock (%s)", settings.aws_bedrock_model_id)
         result = _invoke_bedrock_chat(system_prompt, grounded_prompt, retrieved_memories)
         if result:
+            logger.info("LLM fallback: Bedrock succeeded")
             return result
+        logger.warning("LLM fallback: Bedrock failed")
 
     # Try NVIDIA (if configured)
     nvidia_key = getattr(settings, "nvidia_api_key", "")
     if nvidia_key:
+        logger.info("LLM fallback: trying NVIDIA")
         result = _invoke_nvidia_chat(nvidia_key, system_prompt, grounded_prompt)
         if result:
+            logger.info("LLM fallback: NVIDIA succeeded")
             return result
+        logger.warning("LLM fallback: NVIDIA failed")
 
     # Try Groq (if configured)
     groq_key = getattr(settings, "groq_api_key", "")
     if groq_key:
+        logger.info("LLM fallback: trying Groq")
         result = _invoke_groq_chat(groq_key, system_prompt, grounded_prompt)
         if result:
+            logger.info("LLM fallback: Groq succeeded")
             return result
+        logger.warning("LLM fallback: Groq failed")
 
     # Try Gemini (if configured)
     gemini_key = getattr(settings, "gemini_api_key", "")
     if gemini_key:
+        logger.info("LLM fallback: trying Gemini")
         result = _invoke_gemini_chat(gemini_key, system_prompt, grounded_prompt)
         if result:
+            logger.info("LLM fallback: Gemini succeeded")
             return result
+        logger.warning("LLM fallback: Gemini failed")
 
     # Try Minimax (if configured)
     minimax_key = getattr(settings, "minimax_api_key", "")
     if minimax_key:
+        logger.info("LLM fallback: trying Minimax")
         result = _invoke_minimax_chat(minimax_key, system_prompt, grounded_prompt)
         if result:
+            logger.info("LLM fallback: Minimax succeeded")
             return result
+        logger.warning("LLM fallback: Minimax failed")
 
     # Fallback to Ollama (free, local)
     if _get_ollama_available():
+        logger.info("LLM fallback: trying Ollama (%s)", OLLAMA_MODEL)
         result = _invoke_ollama_chat(system_prompt, grounded_prompt)
         if result:
+            logger.info("LLM fallback: Ollama succeeded")
             return result
+        logger.warning("LLM fallback: Ollama failed")
 
     logger.warning("invoke_reasoning: No LLM backend available")
     return None
 
 
-def invoke_embedding(text: str) -> Optional[list[float]]:
+def invoke_embedding(text: str) -> list[float] | None:
     """Generate a vector embedding for the given text."""
     from config import settings
 
@@ -397,33 +423,49 @@ def invoke_embedding(text: str) -> Optional[list[float]]:
     groq_emb_key = getattr(settings, "groq_embedding_api_key", "")
     groq_key = getattr(settings, "groq_api_key", "")
     if groq_emb_key:
+        logger.info("Embedding fallback: trying Groq")
         result = _invoke_groq_embedding(groq_emb_key, text)
         if result:
+            logger.info("Embedding fallback: Groq succeeded")
             return result
+        logger.warning("Embedding fallback: Groq failed")
     elif groq_key:
         # Fallback to chat key if embedding key not set
+        logger.info("Embedding fallback: trying Groq (chat key)")
         result = _invoke_groq_embedding(groq_key, text)
         if result:
+            logger.info("Embedding fallback: Groq (chat key) succeeded")
             return result
+        logger.warning("Embedding fallback: Groq (chat key) failed")
 
     # Try Gemini (if configured)
     gemini_key = getattr(settings, "gemini_api_key", "")
     if gemini_key:
+        logger.info("Embedding fallback: trying Gemini")
         result = _invoke_gemini_embedding(gemini_key, text)
         if result:
+            logger.info("Embedding fallback: Gemini succeeded")
             return result
+        logger.warning("Embedding fallback: Gemini failed")
 
     # Fallback to Ollama (free, local)
     if _get_ollama_available():
+        logger.info("Embedding fallback: trying Ollama (%s)", OLLAMA_EMBEDDING_MODEL)
         result = _invoke_ollama_embedding(text)
         if result:
+            logger.info("Embedding fallback: Ollama succeeded")
             return result
+        logger.warning("Embedding fallback: Ollama failed")
 
     logger.warning("invoke_embedding: No embedding backend available")
     return None
 
 
-def _build_grounded_prompt(system_prompt: str, user_message: str, retrieved_memories: list[dict] | None) -> str:
+def _build_grounded_prompt(
+    system_prompt: str,
+    user_message: str,
+    retrieved_memories: list[dict] | None,
+) -> str:
     """Build a grounded prompt that includes retrieved memories."""
     if not retrieved_memories:
         return user_message

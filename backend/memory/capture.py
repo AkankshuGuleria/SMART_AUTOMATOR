@@ -21,7 +21,6 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Optional
 
 from watchdog.events import FileSystemEventHandler
 
@@ -42,7 +41,7 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 _WATCHED_EXTENSIONS = frozenset({
     ".py", ".ts", ".tsx", ".js", ".jsx", ".html", ".css",
     ".md", ".json", ".yaml", ".yml", ".toml", ".txt", ".rst",
-    ".cfg", ".ini", ".toml", ".lock",
+    ".cfg", ".ini", ".lock",
 })
 
 # Polling intervals (seconds)
@@ -70,7 +69,7 @@ class FileWatcherThread(threading.Thread):
         self,
         project_id: str = "",
         project_path: str = "",
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
         daemon: bool = True,
     ) -> None:
         super().__init__(name="FileWatcherThread", daemon=daemon)
@@ -89,7 +88,6 @@ class FileWatcherThread(threading.Thread):
             return
 
         try:
-            from watchdog.events import FileSystemEventHandler
             from watchdog.observers import Observer
         except ImportError:
             logger.error("FileWatcherThread: watchdog not installed — cannot watch files")
@@ -142,7 +140,8 @@ class FileWatcherThread(threading.Thread):
                 from sqlalchemy import text
                 session.execute(
                     text(
-                        "INSERT INTO file_edits (project_id, session_id, file_path, change_summary) "
+                        "INSERT INTO file_edits "
+                        "(project_id, session_id, file_path, change_summary) "
                         "VALUES (:project_id, :session_id, :file_path, :change_summary)"
                     ),
                     {
@@ -194,7 +193,7 @@ class GitPollerThread(threading.Thread):
         self,
         project_id: str = "",
         project_path: str = "",
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
         daemon: bool = True,
     ) -> None:
         super().__init__(name="GitPollerThread", daemon=daemon)
@@ -202,7 +201,7 @@ class GitPollerThread(threading.Thread):
         self.project_path = project_path
         self.session_id = session_id
         self._stop_event = threading.Event()
-        self._last_commit_hash: Optional[str] = None
+        self._last_commit_hash: str | None = None
 
     def run(self) -> None:
         if not self.project_path or not os.path.isdir(self.project_path):
@@ -286,7 +285,9 @@ class GitPollerThread(threading.Thread):
                     text(
                         "INSERT INTO commits "
                         "(project_id, session_id, commit_hash, message, author, committed_at) "
-                        "VALUES (:project_id, :session_id, :commit_hash, :message, :author, :committed_at)"
+                        "VALUES (:project_id, :session_id, :commit_hash, "
+                        ":message, :author, :committed_at) "
+                        "ON CONFLICT (project_id, commit_hash) DO NOTHING"
                     ),
                     {
                         "project_id": self.project_id,
@@ -306,15 +307,15 @@ class GitPollerThread(threading.Thread):
                 # Fire the on_commit trigger for the Decision Engine (Phase 4.5)
                 self._fire_on_commit_trigger(commit)
             except Exception as exc:
-                logger.error("GitPollerThread: failed to write commit — %s", exc)
+                logger.error("GitPollerThread: failed to write commit — %s", exc, exc_info=True)
 
     def _fire_on_commit_trigger(self, commit) -> None:
         """Fire the on_commit trigger for the Decision Engine."""
         try:
             from decision_engine.triggers import on_commit
             on_commit(self.project_id, commit.hexsha, commit.message.strip())
-        except Exception:
-            pass  # Decision Engine is Phase 4.5 — don't block Phase 1
+        except Exception as exc:
+            logger.debug("GitPollerThread: on_commit trigger skipped — %s", exc)
 
 
 class TerminalCaptureThread(threading.Thread):
@@ -336,7 +337,7 @@ class TerminalCaptureThread(threading.Thread):
     def __init__(
         self,
         project_id: str = "",
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
         daemon: bool = True,
     ) -> None:
         super().__init__(name="TerminalCaptureThread", daemon=daemon)
@@ -369,7 +370,7 @@ class TerminalCaptureThread(threading.Thread):
     def stop(self) -> None:
         self._stop_event.set()
 
-    def _get_history_file(self) -> Optional[Path]:
+    def _get_history_file(self) -> Path | None:
         """Return the path to the PowerShell ConsoleHost history file on Windows."""
         home = Path.home()
         candidate = (

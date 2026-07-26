@@ -1,7 +1,7 @@
 # ROADMAP.md — 20-Day Build Plan
 
 ## Current Phase
-> **Update this line as you progress:** `Phase 2 - In Progress | Multi-provider LLM integration complete, awaiting Ollama model download`
+> **Update this line as you progress:** `Phase 5 - In Progress | Polish & Submission.`
 
 ---
 
@@ -66,18 +66,17 @@
   on the actual demo machine.
 
 ## Phase 4 (Days 15–17): Agent Actions
-- [ ] "Generate commit message" (grounded in actual diff/staged changes).
-- [ ] "Explain repository" (grounded in README + architecture notes +
+- [x] "Generate commit message" (grounded in actual diff/staged changes).
+- [x] "Explain repository" (grounded in README + architecture notes +
       folder structure).
-- [ ] "Find authentication code" (or equivalent semantic code-location
+- [x] "Find authentication code" (or equivalent semantic code-location
       query) — grounded in file/commit memory, not live code search,
       unless code search is explicitly added as a supplementary source.
-- [ ] "Start development environment" command wired to Automation Layer.
-- [ ] Global Floating Companion Overlay (Tauri global shortcut `Alt+Space` to overlay over VSCode, Browser, Terminal, etc.).
-- [ ] Cross-App Task Execution Engine (asynchronous background execution for building web apps, executing OS actions, and driving tools across other applications).
+- [x] "Start development environment" command wired to Automation Layer.
+- [x] Global Floating Companion Overlay (Tauri global shortcut `Alt+Space` to overlay over VSCode, Browser, Terminal, etc.).
+- [x] Cross-App Task Execution Engine (asynchronous background execution for building web apps, executing OS actions, and driving tools across other applications).
 
 - **Milestone check:** each command works from a natural-language phrasing
-
   a judge might actually use, not just the exact scripted phrase.
 
 ## Phase 4.5 (Days 18–19): Autonomous Decision Engine
@@ -85,23 +84,28 @@
 > for it and treat it as cuttable if Phases 1–4 ran long. A working
 > Phases 1–4 with no Decision Engine is a strong submission; a broken
 > Decision Engine bolted on in the last hours is not.
-- [ ] Pick 1–2 triggers only for the MVP (recommended: "on commit,"
+- [x] Pick 1–2 triggers only for the MVP (recommended: "on commit,"
       "on session end") — see `PROJECT.md` §9 guardrails.
-- [ ] `decision_engine/triggers.py` — trigger detection wired to real
+- [x] `decision_engine/triggers.py` — trigger detection wired to real
       git/session events (reuses Phase 1 capture, doesn't duplicate it).
-- [ ] `decision_engine/planner.py` — decides suggest-vs-execute per
+- [x] `decision_engine/planner.py` — decides suggest-vs-execute per
       action type; passive/reversible actions (update summary, flag
       TODOs) auto-execute, anything environment-changing only suggests.
-- [ ] Provenance surfaced in the UI for every autonomous action taken
+- [x] Provenance surfaced in the UI for every autonomous action taken
       (`SKILLS.md` §10).
 - **Milestone check:** commit real code to a test project and confirm
   the agent proactively updates its summary/brief and surfaces a
   relevant TODO — with visible provenance — without being asked.
 
 ## Phase 5 (Day 20): Polish & submission
+- [ ] Chat-first UI pass: persistent chat bar, live project cards, inline action cards, command palette (`Cmd/Ctrl+K`), activity feed.
+- [ ] Intent routing wired: NLU chat intents route through `decision_engine/intent_parser.py` → planner → execution.
+- [ ] System command execution wired with provenance and undo hints.
+- [ ] External agent bridge wired (`backend/automation/agent_bridge.py`) with graceful fallback for unavailable tools.
+- [ ] New project creation pipeline implemented as multi-step chat flow with optional design/code generation steps.
+- [ ] Debugging assistance implemented using terminal capture logs with explicit confirmation before applying changes.
 - [ ] Full rehearsal of the 3-minute demo flow (`PROJECT.md` §13), 3+ times.
 - [ ] Final backup demo video re-recorded against the finished build.
-- [ ] UI pass for consistency, loading/error states (`SKILLS.md` §3).
 - [ ] Docs pass — confirm `README.md` → all files are accurate and match
       the shipped build, not the original plan.
 - [ ] Submission write-up drafted, referencing `PROJECT.md` §11 (why this
@@ -112,9 +116,11 @@
 ## Risk log (update as risks are found/resolved)
 | Risk | Likelihood | Mitigation | Status |
 |---|---|---|---|
+| Tauri shell can start without the FastAPI backend | Medium | `npm run tauri dev` now starts FastAPI on `127.0.0.1:8000` before launching Vite/Tauri | Mitigated |
 | Live OS automation fails during judged demo | Medium | Recorded backup video (Phase 3) | Open |
 | Embedding dimension mismatch after model change | Low | Pin model in `TECH_STACK.md`, add regression test | Open |
 | Retrieval overfits to demo script phrasing | Medium | Test 5+ phrasings per intent (`SKILLS.md` §5) | Open |
 | Bedrock latency slows demo pacing | Medium | Add timeout + fallback raw-memory display | Open |
 | Decision Engine scope slips into the last 2 days | Medium | Treat Phase 4.5 as cuttable; Phases 1–4 alone are a complete, demoable submission | Open |
 | Autonomous action surprises/annoys the developer in the demo | Low-Medium | Default to suggest-not-execute for anything environment-changing (`PROJECT.md` §9) | Open |
+| Chat-first redesign breaks mobile/small viewport usability | Medium | Keep responsive layout and keyboard-first command palette as fallback | Open |

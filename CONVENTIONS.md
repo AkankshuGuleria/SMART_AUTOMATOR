@@ -17,8 +17,8 @@ D:\AUTOMATA
 │
 ├── frontend/                  # React + Tauri desktop app
 │   ├── src/
-│   │   ├── components/
-│   │   ├── screens/           # MorningBrief, RestoreWorkspace, QueryChat
+│   │   ├── components/        # Chat-first UI components
+│   │   ├── screens/           # MorningBrief, RestoreWorkspace, ExplainRepository
 │   │   ├── lib/                # API client to Python agent
 │   │   └── styles/
 │   ├── src-tauri/              # Tauri Rust shell
@@ -32,13 +32,16 @@ D:\AUTOMATA
 │   ├── ai/                      # Reasoning Engine module
 │   │   ├── bedrock_client.py
 │   │   └── prompts/
-│   ├── automation/               # Automation Layer (OS-specific)
+│   ├── automation/               # Automation Layer (OS-specific + integrations)
 │   │   ├── restore.py
 │   │   ├── dev_servers.py
-│   │   └── os_windows.py       # (or os_mac.py / os_linux.py)
-│   ├── decision_engine/          # Autonomous, unsolicited action (triggers)
+│   │   ├── os_windows.py
+│   │   ├── command_executor.py # system command execution with provenance
+│   │   └── agent_bridge.py     # external AI tool integrations
+│   ├── decision_engine/          # Autonomous action + chat routing
 │   │   ├── triggers.py          # e.g. on_commit, on_session_end
-│   │   └── planner.py           # decides suggest-vs-execute per action
+│   │   ├── planner.py           # decides suggest-vs-execute per action
+│   │   └── intent_parser.py     # NLU routing for chat-first entrypoint
 │   ├── db/
 │   │   ├── schema.sql           # matches DATABASE_SCHEMA.md exactly
 │   │   └── client.py

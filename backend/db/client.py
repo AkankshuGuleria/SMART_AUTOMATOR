@@ -18,8 +18,8 @@ Usage:
 """
 
 import logging
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator, Optional
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.dialects.postgresql.base import PGDialect
@@ -65,7 +65,7 @@ def _init_engine() -> None:
             max_overflow=10,
             connect_args={"application_name": "automata-agent"},
         )
-        _SessionLocal = sessionmaker(bind=_engine, autocommit=False, autoflush=False)
+        _SessionLocal = sessionmaker(bind=_engine, autoflush=False)
         logger.info("db/client: CockroachDB engine initialized successfully")
     except Exception as exc:  # pragma: no cover
         logger.error("db/client: Failed to create DB engine — %s", exc)
@@ -122,7 +122,7 @@ def health_check() -> dict:
 
 # ─── Projects CRUD ───────────────────────────────────────────────────────────
 
-def insert_project(name: str, repo_path: str, remote_url: Optional[str] = None) -> Optional[str]:
+def insert_project(name: str, repo_path: str, remote_url: str | None = None) -> str | None:
     """Insert a new project. Returns the project UUID or None on failure."""
     from sqlalchemy import text
 
@@ -157,14 +157,19 @@ def get_projects() -> list[dict]:
         if session is None:
             return []
         try:
-            result = session.execute(text("SELECT id, name, repo_path, remote_url, created_at FROM projects ORDER BY created_at DESC"))
+            result = session.execute(
+                text(
+                    "SELECT id, name, repo_path, remote_url, created_at "
+                    "FROM projects ORDER BY created_at DESC"
+                )
+            )
             return [dict(row._mapping) for row in result.fetchall()]
         except Exception as exc:
             logger.error("db/client: get_projects failed — %s", exc)
             return []
 
 
-def get_project(project_id: str) -> Optional[dict]:
+def get_project(project_id: str) -> dict | None:
     """Return a single project by ID."""
     from sqlalchemy import text
 
@@ -175,7 +180,10 @@ def get_project(project_id: str) -> Optional[dict]:
             return None
         try:
             result = session.execute(
-                text("SELECT id, name, repo_path, remote_url, created_at FROM projects WHERE id = :id"),
+                text(
+                    "SELECT id, name, repo_path, remote_url, created_at "
+                    "FROM projects WHERE id = :id"
+                ),
                 {"id": project_id},
             )
             row = result.fetchone()
@@ -187,7 +195,7 @@ def get_project(project_id: str) -> Optional[dict]:
 
 # ─── Sessions CRUD ───────────────────────────────────────────────────────────
 
-def insert_session(project_id: str) -> Optional[str]:
+def insert_session(project_id: str) -> str | None:
     """Start a new session for a project. Returns the session UUID or None."""
     from sqlalchemy import text
 
@@ -211,8 +219,13 @@ def insert_session(project_id: str) -> Optional[str]:
             return None
 
 
-def end_session(session_id: str, summary: Optional[str] = None) -> bool:
-    """End a session by setting ended_at and optionally a summary."""
+def end_session(project_id: str, session_id: str, summary: str | None = None) -> bool:
+    """End a session by setting ended_at and optionally a summary.
+
+    After a successful update, fires the Decision Engine on_session_end trigger
+    so any autonomous follow-up actions (brief regeneration, next-task suggestion,
+    etc.) are queued automatically.
+    """
     from sqlalchemy import text
 
     from db.client import get_session
@@ -226,15 +239,24 @@ def end_session(session_id: str, summary: Optional[str] = None) -> bool:
                     "UPDATE sessions SET ended_at = now(), summary = :summary "
                     "WHERE id = :session_id AND ended_at IS NULL"
                 ),
-                {"session_id": session_id, "summary": summary},
+                {"project_id": project_id, "session_id": session_id, "summary": summary},
             )
-            return True
         except Exception as exc:
             logger.error("db/client: end_session failed — %s", exc)
             return False
 
+    from decision_engine.triggers import on_session_end
+    try:
+        on_session_end(project_id, session_id)
+    except Exception as exc:
+        logger.warning(
+            "db/client: on_session_end trigger failed — %s", exc
+        )
 
-def get_active_session(project_id: str) -> Optional[dict]:
+    return True
+
+
+def get_active_session(project_id: str) -> dict | None:
     """Return the currently active (not ended) session for a project."""
     from sqlalchemy import text
 
@@ -262,7 +284,7 @@ def get_active_session(project_id: str) -> Optional[dict]:
 
 def insert_commit(
     project_id: str,
-    session_id: Optional[str],
+    session_id: str | None,
     commit_hash: str,
     message: str,
     author: str,
@@ -281,7 +303,8 @@ def insert_commit(
                 text(
                     "INSERT INTO commits "
                     "(project_id, session_id, commit_hash, message, author, committed_at) "
-                    "VALUES (:project_id, :session_id, :commit_hash, :message, :author, :committed_at)"
+                    "VALUES (:project_id, :session_id, :commit_hash, "
+                    ":message, :author, :committed_at)"
                 ),
                 {
                     "project_id": project_id,
@@ -326,9 +349,9 @@ def get_commits(project_id: str, limit: int = 20) -> list[dict]:
 
 def insert_file_edit(
     project_id: str,
-    session_id: Optional[str],
+    session_id: str | None,
     file_path: str,
-    change_summary: Optional[str] = None,
+    change_summary: str | None = None,
 ) -> bool:
     """Insert a file edit record."""
     from sqlalchemy import text
@@ -385,10 +408,10 @@ def get_file_edits(project_id: str, limit: int = 20) -> list[dict]:
 
 def insert_terminal_command(
     project_id: str,
-    session_id: Optional[str],
+    session_id: str | None,
     command: str,
     cwd: str,
-    exit_code: Optional[int] = None,
+    exit_code: int | None = None,
 ) -> bool:
     """Insert a terminal command record."""
     from sqlalchemy import text
@@ -450,7 +473,7 @@ def insert_todo(
     description: str,
     source: str = "manual",
     status: str = "pending",
-) -> Optional[str]:
+) -> str | None:
     """Insert a TODO. Returns the TODO UUID or None on failure."""
     from sqlalchemy import text
 
@@ -480,7 +503,7 @@ def insert_todo(
             return None
 
 
-def get_todos(project_id: str, status: Optional[str] = None) -> list[dict]:
+def get_todos(project_id: str, status: str | None = None) -> list[dict]:
     """Return TODOs for a project, optionally filtered by status."""
     from sqlalchemy import text
 
@@ -493,7 +516,8 @@ def get_todos(project_id: str, status: Optional[str] = None) -> list[dict]:
             if status:
                 result = session.execute(
                     text(
-                        "SELECT id, project_id, description, status, source, created_at, resolved_at "
+                        "SELECT id, project_id, description, status, source, "
+                        "created_at, resolved_at "
                         "FROM todos WHERE project_id = :project_id AND status = :status "
                         "ORDER BY created_at DESC"
                     ),
@@ -502,7 +526,8 @@ def get_todos(project_id: str, status: Optional[str] = None) -> list[dict]:
             else:
                 result = session.execute(
                     text(
-                        "SELECT id, project_id, description, status, source, created_at, resolved_at "
+                        "SELECT id, project_id, description, status, source, "
+                        "created_at, resolved_at "
                         "FROM todos WHERE project_id = :project_id "
                         "ORDER BY created_at DESC"
                     ),
@@ -537,13 +562,36 @@ def update_todo_status(todo_id: str, status: str) -> bool:
             return False
 
 
+def update_todo_description(todo_id: str, description: str) -> bool:
+    """Update a TODO's description."""
+    from sqlalchemy import text
+
+    from db.client import get_session
+
+    with get_session() as session:
+        if session is None:
+            return False
+        try:
+            session.execute(
+                text(
+                    "UPDATE todos SET description = :description "
+                    "WHERE id = :todo_id"
+                ),
+                {"todo_id": todo_id, "description": description},
+            )
+            return True
+        except Exception as exc:
+            logger.error("db/client: update_todo_description failed — %s", exc)
+            return False
+
+
 # ─── Architecture Notes CRUD ─────────────────────────────────────────────────
 
 def insert_architecture_note(
     project_id: str,
     title: str,
     content: str,
-) -> Optional[str]:
+) -> str | None:
     """Insert an architecture note. Returns the note UUID or None on failure."""
     from sqlalchemy import text
 
@@ -598,9 +646,9 @@ def upsert_daily_brief(
     project_id: str,
     brief_date: str,
     commits_count: int = 0,
-    highlights: Optional[list[str]] = None,
-    pending_items: Optional[list[str]] = None,
-    last_edited_file: Optional[str] = None,
+    highlights: list[str] | None = None,
+    pending_items: list[str] | None = None,
+    last_edited_file: str | None = None,
 ) -> bool:
     """Insert or update a daily brief for a project."""
     from sqlalchemy import text
@@ -614,8 +662,10 @@ def upsert_daily_brief(
             session.execute(
                 text(
                     "INSERT INTO daily_briefs "
-                    "(project_id, brief_date, commits_count, highlights, pending_items, last_edited_file) "
-                    "VALUES (:project_id, :brief_date, :commits_count, :highlights, :pending_items, :last_edited_file) "
+                    "(project_id, brief_date, commits_count, highlights, "
+                    "pending_items, last_edited_file) "
+                    "VALUES (:project_id, :brief_date, :commits_count, "
+                    ":highlights, :pending_items, :last_edited_file) "
                     "ON CONFLICT (project_id, brief_date) DO UPDATE SET "
                     "commits_count = EXCLUDED.commits_count, "
                     "highlights = EXCLUDED.highlights, "
@@ -638,7 +688,7 @@ def upsert_daily_brief(
             return False
 
 
-def get_daily_brief(project_id: str, brief_date: Optional[str] = None) -> Optional[dict]:
+def get_daily_brief(project_id: str, brief_date: str | None = None) -> dict | None:
     """Get the daily brief for a project (defaults to today)."""
     from sqlalchemy import text
 
@@ -680,7 +730,7 @@ def insert_taste_preference(
     description: str,
     confidence: float = 0.5,
     evidence_count: int = 1,
-) -> Optional[str]:
+) -> str | None:
     """Insert a taste preference. Returns the preference UUID or None on failure."""
     from sqlalchemy import text
 
@@ -724,7 +774,8 @@ def get_taste_preferences(developer_id: str) -> list[dict]:
         try:
             result = session.execute(
                 text(
-                    "SELECT id, developer_id, category, description, confidence, evidence_count, last_observed_at "
+                    "SELECT id, developer_id, category, description, confidence, "
+                    "evidence_count, last_observed_at "
                     "FROM taste_preferences WHERE developer_id = :developer_id "
                     "ORDER BY last_observed_at DESC"
                 ),
@@ -739,11 +790,11 @@ def get_taste_preferences(developer_id: str) -> list[dict]:
 # ─── Credential Refs CRUD ────────────────────────────────────────────────────
 
 def insert_credential_ref(
-    project_id: Optional[str],
+    project_id: str | None,
     ref_name: str,
     purpose: str,
-    expires_at: Optional[str] = None,
-) -> Optional[str]:
+    expires_at: str | None = None,
+) -> str | None:
     """Insert a credential reference (never the actual secret value)."""
     from sqlalchemy import text
 
@@ -773,7 +824,7 @@ def insert_credential_ref(
             return None
 
 
-def get_credential_refs(project_id: Optional[str] = None) -> list[dict]:
+def get_credential_refs(project_id: str | None = None) -> list[dict]:
     """Return credential references, optionally scoped to a project."""
     from sqlalchemy import text
 
@@ -808,10 +859,10 @@ def get_credential_refs(project_id: Optional[str] = None) -> list[dict]:
 # ─── Decision Log CRUD ───────────────────────────────────────────────────────
 
 def insert_decision(
-    project_id: Optional[str],
+    project_id: str | None,
     decision: str,
     rationale: str,
-) -> Optional[str]:
+) -> str | None:
     """Insert a decision log entry. Returns the decision UUID or None on failure."""
     from sqlalchemy import text
 
@@ -836,7 +887,7 @@ def insert_decision(
             return None
 
 
-def get_decisions(project_id: Optional[str] = None, limit: int = 20) -> list[dict]:
+def get_decisions(project_id: str | None = None, limit: int = 20) -> list[dict]:
     """Return decision log entries."""
     from sqlalchemy import text
 
@@ -876,8 +927,8 @@ def insert_mistake(
     symptom: str,
     root_cause: str,
     fix: str,
-    module: Optional[str] = None,
-) -> Optional[str]:
+    module: str | None = None,
+) -> str | None:
     """Insert a mistake log entry. Returns the mistake UUID or None on failure."""
     from sqlalchemy import text
 

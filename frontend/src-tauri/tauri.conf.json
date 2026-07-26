@@ -2,21 +2,34 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "AUTOMATA",
   "version": "0.1.0",
-  "identifier": "com.tauri.dev",
+  "identifier": "com.automata.dev",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run dev:with-backend",
     "beforeBuildCommand": "npm run build"
   },
   "app": {
     "windows": [
       {
         "title": "AUTOMATA",
-        "width": 800,
-        "height": 600,
+        "label": "main",
+        "width": 1200,
+        "height": 800,
         "resizable": true,
         "fullscreen": false
+      },
+      {
+        "title": "AUTOMATA Companion",
+        "label": "companion",
+        "width": 380,
+        "height": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "visible": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "center": true
       }
     ],
     "security": {

@@ -87,7 +87,8 @@ def _log_trigger_event(trigger: str, project_id: str, context: dict[str, Any]) -
     rationale = (
         f"Trigger '{trigger}' was detected automatically. "
         f"Context: {context}. "
-        f"This is a passive trigger — no environment-changing actions will be taken without developer confirmation."
+        "This is a passive trigger — no environment-changing actions "
+        "will be taken without developer confirmation."
     )
 
     try:

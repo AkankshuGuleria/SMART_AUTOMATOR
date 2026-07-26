@@ -20,11 +20,10 @@ from typing import Any
 
 from automation.os_windows import (
     checkout_git_branch,
-    launch_browser,
     launch_editor,
     open_terminal,
 )
-from db.client import get_active_session, get_project
+from db.client import get_project
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +67,11 @@ def restore_workspace(project_id: str, session_id: str | None = None) -> dict[st
 
     repo_path = project.get("repo_path", "")
     if not repo_path or not os.path.isdir(repo_path):
-        steps.append({"step": "git_checkout", "status": "error", "detail": f"Repo path not found: {repo_path}"})
+        steps.append({
+            "step": "git_checkout",
+            "status": "error",
+            "detail": f"Repo path not found: {repo_path}",
+        })
         overall = "error"
     else:
         # Step 1: Git branch checkout
@@ -80,7 +83,11 @@ def restore_workspace(project_id: str, session_id: str | None = None) -> dict[st
             steps.append({
                 "step": "git_checkout",
                 "status": "ok" if success else "error",
-                "detail": f"Checked out branch '{current_branch}'" if success else "Git checkout failed",
+                "detail": (
+                    f"Checked out branch '{current_branch}'"
+                    if success
+                    else "Git checkout failed"
+                ),
             })
             if not success:
                 overall = "partial"
@@ -137,5 +144,3 @@ def restore_workspace(project_id: str, session_id: str | None = None) -> dict[st
         "overall": overall,
     }
 
-
-import os

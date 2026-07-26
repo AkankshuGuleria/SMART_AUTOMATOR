@@ -29,8 +29,9 @@ def main():
             print(f"  - ID: {s[0]} | Project ID: {s[1]} | Started: {s[2]} | Ended: {s[3]}")
 
         # Get counts for other tables
-        for table in ["commits", "file_edits", "terminal_commands", "todos"]:
-            count = session.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
+        _ALLOWED_TABLES = {"commits", "file_edits", "terminal_commands", "todos"}
+        for table in _ALLOWED_TABLES:
+            count = session.execute(text("SELECT COUNT(*) FROM " + table)).scalar()  # noqa: S608
             print(f"Total {table}: {count}")
 
 if __name__ == "__main__":

@@ -17,12 +17,11 @@ Phase 2: Wire to Bedrock embedding model when API keys are available.
 """
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
-def generate_embedding(text: str) -> Optional[list[float]]:
+def generate_embedding(text: str) -> list[float] | None:
     """
     Generate a vector embedding for the given text.
 
@@ -48,7 +47,7 @@ def generate_embedding(text: str) -> Optional[list[float]]:
     return result
 
 
-def batch_generate_embeddings(texts: list[str]) -> list[Optional[list[float]]]:
+def batch_generate_embeddings(texts: list[str]) -> list[list[float] | None]:
     """
     Generate embeddings for a batch of texts.
 

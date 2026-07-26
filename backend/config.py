@@ -44,7 +44,7 @@ class Settings:
 
     @property
     def bedrock_available(self) -> bool:
-        return bool(self.aws_region and self.aws_bedrock_model_id)
+        return bool(self.aws_region and self.aws_bedrock_model_id and self.aws_access_key_id)
 
     @property
     def ollama_available(self) -> bool:

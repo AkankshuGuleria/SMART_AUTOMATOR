@@ -46,10 +46,46 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': {
-        target: 'http://127.0.0.1:8000',
+      '/chat': {
+        target: 'http://127.0.0.1:8001',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+      '/query': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+      },
+      '/health': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+      },
+      '/projects': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+      },
+      '/commands': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+      },
+      '/tools': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+      },
+      '/activity-feed': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+      },
+      '/cross-app': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+      },
+      '/explain-repository': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+      },
+      '/ws': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        ws: true,
       },
     },
   },

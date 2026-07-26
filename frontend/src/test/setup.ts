@@ -7,3 +7,5 @@
  * This file is referenced in vite.config.ts → test.setupFiles.
  */
 import '@testing-library/jest-dom'
+
+Element.prototype.scrollIntoView = () => {}

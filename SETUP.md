@@ -109,8 +109,12 @@ npm run dev        # Vite dev server at http://localhost:5173
 
 Tauri desktop shell (requires Rust toolchain + WebView2):
 ```powershell
-npm run tauri dev  # Phase 2+ — set up Tauri first with: npm install @tauri-apps/cli
+npm run tauri dev  # Starts FastAPI on http://127.0.0.1:8000 if needed, then Vite/Tauri at http://localhost:5173
 ```
+
+If Cargo reports `failed to remove file ... target\debug\app.exe`, close the
+previous AUTOMATA desktop window or stop the stale `app.exe` process, then run
+`npm run tauri dev` again.
 
 ---
 
@@ -132,6 +136,7 @@ npm test
 
 - [ ] `uv run python main.py` starts without crashing; logs "DB not connected" warning (not a crash).
 - [ ] `npm run dev` serves the React app at `http://localhost:5173`.
+- [ ] `npm run tauri dev` starts the backend on `http://127.0.0.1:8000` when needed and opens the Tauri shell against Vite.
 - [ ] `http://127.0.0.1:8000/health` returns `{"api": "ok", ...}` when backend is running.
 - [ ] Swagger UI at `http://127.0.0.1:8000/docs` shows all routes.
 - [ ] `uv run pytest tests/ -v` passes all tests (Phase 0: test_config.py).

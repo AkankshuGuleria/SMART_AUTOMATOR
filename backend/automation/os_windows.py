@@ -18,7 +18,6 @@ Phase 3: Implement real Windows OS calls.
 
 import logging
 import subprocess
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +39,16 @@ def checkout_git_branch(repo_path: str, branch: str) -> bool:
 
         repo = git.Repo(repo_path)
         repo.git.checkout(branch)
-        logger.info("os_windows.checkout_git_branch: success | repo=%s branch=%s", repo_path, branch)
+        logger.info(
+            "os_windows.checkout_git_branch: success | repo=%s branch=%s",
+            repo_path, branch,
+        )
         return True
     except Exception as exc:
-        logger.error("os_windows.checkout_git_branch: failed | repo=%s branch=%s error=%s", repo_path, branch, exc)
+        logger.error(
+            "os_windows.checkout_git_branch: failed | repo=%s branch=%s error=%s",
+            repo_path, branch, exc,
+        )
         return False
 
 
@@ -79,11 +84,14 @@ def open_terminal(cwd: str = "") -> bool:
         logger.info("os_windows.open_terminal: opened PowerShell | cwd=%s", cwd)
         return True
     except Exception as exc:
-        logger.error("os_windows.open_terminal: failed to open terminal | cwd=%s error=%s", cwd, exc)
+        logger.error(
+            "os_windows.open_terminal: failed to open terminal | cwd=%s error=%s",
+            cwd, exc,
+        )
         return False
 
 
-def open_terminal_with_command(command: str, cwd: str = "") -> Optional[int]:
+def open_terminal_with_command(command: str, cwd: str = "") -> int | None:
     """
     Open a Windows Terminal window and execute the given command.
 
@@ -137,7 +145,10 @@ def launch_editor(project_path: str, editor: str = "code") -> bool:
         logger.warning("os_windows.launch_editor: editor not found — %s", editor)
         return False
     except Exception as exc:
-        logger.error("os_windows.launch_editor: failed | editor=%s path=%s error=%s", editor, project_path, exc)
+        logger.error(
+            "os_windows.launch_editor: failed | editor=%s path=%s error=%s",
+            editor, project_path, exc,
+        )
         return False
 
 
