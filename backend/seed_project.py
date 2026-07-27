@@ -42,7 +42,7 @@ def seed() -> None:
         (
             "Reasoning layer",
             "backend/ai/bedrock_client.py wraps Ollama as the default free backend, with "
-            "Bedrock, Groq, Gemini, Minimax, and NVIDIA as fallback chains. Embeddings and "
+            "Bedrock, Groq, Gemini, Minimax, OpenRouter, Cohere, and NVIDIA as fallback chains. Embeddings and "
             "chat both route through invoke_embedding and invoke_reasoning.",
         ),
         (

@@ -12,7 +12,7 @@ const WS_BASE = () => {
   if (typeof window !== "undefined") {
     return `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
   }
-  return "ws://127.0.0.1:8001";
+  return "ws://127.0.0.1:8000";
 };
 const WS_URL = `${WS_BASE()}/ws`;
 
@@ -214,6 +214,23 @@ export async function getMorningBrief(projectId: string): Promise<{ brief: Morni
   return apiFetch<{ brief: MorningBrief | null }>(`/projects/${projectId}/brief`);
 }
 
+export async function generateMorningBrief(projectId: string): Promise<{ success: boolean; brief: MorningBrief | null }> {
+  return apiFetch<{ success: boolean; brief: MorningBrief | null }>(`/projects/${projectId}/brief/generate`, {
+    method: "POST",
+  });
+}
+
+export async function getReasoningMode(): Promise<{ reasoning_mode: string }> {
+  return apiFetch<{ reasoning_mode: string }>("/settings/reasoning-mode");
+}
+
+export async function setReasoningMode(mode: string): Promise<{ reasoning_mode: string }> {
+  return apiFetch<{ reasoning_mode: string }>("/settings/reasoning-mode", {
+    method: "POST",
+    body: JSON.stringify({ reasoning_mode: mode }),
+  });
+}
+
 export async function restoreWorkspace(projectId: string): Promise<RestoreResult> {
   return apiFetch<RestoreResult>(`/projects/${projectId}/restore`, { method: "POST" });
 }
@@ -312,7 +329,7 @@ export async function endSession(projectId: string, summary?: string): Promise<E
 
 /** Explain a repository grounded in stored project memory. */
 export async function explainRepository(projectId: string, repoPath: string): Promise<ExplainRepositoryResult> {
-  return apiFetch<ExplainRepositoryResult>(`http://127.0.0.1:8000/projects/${projectId}/explain-repository`, {
+  return apiFetch<ExplainRepositoryResult>(`/projects/${projectId}/explain-repository`, {
     method: "POST",
     body: JSON.stringify({ projectId, repoPath }),
   });

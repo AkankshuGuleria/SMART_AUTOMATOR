@@ -2,17 +2,16 @@
 memory/capture.py — AUTOMATA Persistent Memory Engine: capture pipeline.
 
 Owns:    Observing developer activity: file system changes, git commits,
-          terminal commands, TODOs from code comments.
-          Writes captured events through db/client.py ONLY — never directly
-          to CockroachDB from this module.
+           terminal commands, TODOs from code comments.
+           Writes captured events through db/client.py ONLY — never directly
+           to CockroachDB from this module.
 Never:   Must not contain retrieval logic (→ retrieval.py).
-          Must not call Bedrock or generate embeddings (→ embeddings.py).
-          Must not execute OS actions (→ automation/).
-Ref:     ARCHITECTURE.md §3.2a, §4 (capture data flow), DATABASE_SCHEMA.md.
-
-Phase 0: This module is a stub. Thread classes are defined but do not start.
+           Must not call Bedrock or generate embeddings (→ embeddings.py).
+           Must not execute OS actions (→ automation/).
+ Ref:     ARCHITECTURE.md §3.2a, §4 (capture data flow), DATABASE_SCHEMA.md.
+ 
 Phase 1: Implement FileWatcherThread, GitPollerThread, TerminalCaptureThread.
-         Wire threads in main.py → _start_background_watchers().
+          Wire threads in main.py → _start_background_watchers().
 """
 
 import logging

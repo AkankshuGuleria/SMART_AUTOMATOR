@@ -8,6 +8,7 @@ Ref: ARCHITECTURE.md section 3.1, section 3.2, TECH_STACK.md frontend transport.
 
 import json
 import logging
+import os
 from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -54,7 +55,32 @@ async def health() -> dict:
         "db": db_health_check(),
         "bedrock": "configured" if settings.bedrock_available else "not_configured",
         "embedding": "configured" if settings.embedding_available else "not_configured",
+        "reasoning_mode": settings.reasoning_mode,
     }
+
+
+@app.get("/settings/reasoning-mode", tags=["settings"])
+async def get_reasoning_mode() -> dict:
+    """Return the current reasoning mode preference."""
+    return {"reasoning_mode": settings.reasoning_mode}
+
+
+@app.post("/settings/reasoning-mode", tags=["settings"])
+async def set_reasoning_mode(body: dict) -> dict:
+    """Set the reasoning mode preference (local, cloud, or auto)."""
+    from config import settings as _settings
+
+    mode = str(body.get("reasoning_mode", "auto")).strip().lower()
+    if mode not in ("local", "cloud", "auto"):
+        return {"error": f"Invalid reasoning_mode: {mode}. Use 'local', 'cloud', or 'auto'."}
+
+    # Update the environment variable so it persists
+    os.environ["REASONING_MODE"] = mode
+
+    # Reload settings
+    _settings._load_settings()
+
+    return {"reasoning_mode": mode}
 
 
 @app.get("/projects", tags=["projects"])
@@ -82,6 +108,39 @@ async def register_project(body: dict) -> dict:
         return {"error": "failed to insert project"}
 
     return {"id": project_id, "name": name, "repo_path": repo_path}
+
+
+@app.post("/projects/{project_id}/brief/generate", tags=["memory"])
+async def generate_morning_brief(project_id: str) -> dict:
+    """Generate and persist a morning brief for the project."""
+    from agent_actions import generate_project_summary
+    from db.client import upsert_daily_brief, get_daily_brief
+
+    result = generate_project_summary(project_id)
+    if result is None or result.get("error"):
+        return {"error": "Failed to generate brief", "brief": None}
+
+    summary = result.get("summary", "")
+    if not summary or summary == "No summary available.":
+        return {"error": "No summary generated", "brief": None}
+
+    # Parse highlights from the summary (bulleted lines)
+    highlights = [
+        line.lstrip("- ").strip()
+        for line in summary.splitlines()
+        if line.strip().startswith("-")
+    ]
+
+    success = upsert_daily_brief(
+        project_id=project_id,
+        brief_date=datetime.now().strftime("%Y-%m-%d"),
+        commits_count=0,
+        highlights=highlights if highlights else [summary],
+        pending_items=[],
+    )
+
+    brief = get_daily_brief(project_id)
+    return {"success": success, "brief": brief}
 
 
 @app.get("/projects/{project_id}/brief", tags=["memory"])
@@ -183,8 +242,6 @@ async def explain_repository_route(body: dict) -> dict:
     recent.extend(retrieve_recent(project_id, "todos", limit=5))
 
     result = synthesize_explanation(project_id, repo_path, recent_memories=recent)
-    if result is None:
-        result = synthesize_explanation(project_id, repo_path)
     return result
 
 
@@ -202,6 +259,7 @@ async def query_memory(body: dict) -> dict:
 
     question = str(body.get("question", "")).strip()
     project_id = body.get("project_id")
+    requested_mode = str(body.get("reasoning_mode", "")).strip().lower() or None
 
     if not question:
         return {
@@ -229,6 +287,7 @@ async def query_memory(body: dict) -> dict:
     grounded = False
 
     if memories:
+        mode_override = requested_mode if requested_mode in {"cloud", "bedrock", "local", "auto"} else None
         answer = invoke_reasoning(
             system_prompt=(
                 "You are AUTOMATA's Reasoning Engine. Answer tersely using only "
@@ -237,6 +296,7 @@ async def query_memory(body: dict) -> dict:
             ),
             user_message=question,
             retrieved_memories=memories,
+            reasoning_mode=mode_override,
         )
         grounded = bool(answer)
 
@@ -359,59 +419,85 @@ async def chat(body: dict) -> dict:
     """Parse a chat message, route intent, and return a structured response."""
     from decision_engine.intent_parser import IntentParser, IntentType
     from decision_engine.planner import plan
-    from automation.command_executor import CommandExecutor
 
     message = str(body.get("message", "")).strip()
     project_id = body.get("project_id")
     active_project_id = body.get("active_project_id")
-    allow_execute = bool(body.get("allow_execute", False))
 
     if not message:
         return {"error": "message is required"}
 
     parser = IntentParser()
     parsed = parser.parse(message, active_project_id=active_project_id or project_id)
-    executed_action = None
     error = None
+    planner_reply = ""
+    plan_result: dict = {"actions": [], "reply": ""}
 
     if parsed.intent == IntentType.UNKNOWN:
-        response = {
-            "intent": "general_chat",
-            "reply": "I can help with projects, restoring workspaces, running commands, or explaining code. Try: \"resume where I left off\" or \"run tests\".",
+        planner_reply = (
+            "I'm not sure how to help with that. Try:\n"
+            "• \"open browser to chatgpt.com\"\n"
+            "• \"explain repo\"\n"
+            "• \"what was I working on yesterday?\"\n"
+            "• \"run tests\"\n"
+            "• \"resume where I left off\""
+        )
+        return {
+            "intent": "unknown",
+            "confidence": 0.0,
+            "reply": planner_reply,
             "actions": [],
+            "executed_actions": [],
+            "project_id": parsed.project_id,
+            "error": None,
         }
+
+    elif parsed.intent == IntentType.GENERAL_CHAT:
+        planner_reply = (
+            "Hi! I'm AUTOMATA — your persistent memory developer agent.\n\n"
+            "I can help you:\n"
+            "• Resume and restore your project workspace\n"
+            "• Answer questions about what you were working on\n"
+            "• Open apps and browsers\n"
+            "• Generate commit messages\n"
+            "• Explain your codebase\n"
+            "• Run tests and suggest next tasks\n\n"
+            "Try: \"open browser to chatgpt.com\" or \"what did I do yesterday?\""
+        )
+        return {
+            "intent": "general_chat",
+            "confidence": parsed.confidence,
+            "reply": planner_reply,
+            "actions": [],
+            "executed_actions": [],
+            "project_id": parsed.project_id,
+            "error": None,
+        }
+
     else:
         try:
             plan_result = plan(
-                trigger=f"chat:{parsed.intent}",
-                context={"message": message, "parsed": parsed.params or {}, "project_id": parsed.project_id},
+                trigger=f"chat:{parsed.intent.value}",
+                context={
+                    "message": message,
+                    "parsed": parsed.params or {},
+                    "project_id": parsed.project_id,
+                },
             )
-            executed_actions = []
-            for action in plan_result.get("actions", []):
-                if action.get("executed"):
-                    executed_actions.append(action)
-            response = {
-                "intent": parsed.intent.value,
-                "reply": f"Intent: {parsed.intent.value}. Executed {len(executed_actions)} action(s).",
-                "actions": plan_result.get("actions", []),
-                "executed_actions": executed_actions,
-            }
+            planner_reply = plan_result.get("reply") or ""
         except Exception as exc:
             logger.exception("chat: planner failed")
-            response = {
-                "intent": parsed.intent.value,
-                "reply": f"Intent recognized as {parsed.intent.value}, but planning failed.",
-                "actions": [],
-                "executed_actions": [],
-            }
+            planner_reply = f"Intent recognised as `{parsed.intent.value}`, but planning failed: {exc}"
             error = str(exc)
+
+    executed_actions = [a for a in plan_result.get("actions", []) if a.get("executed")]
 
     return {
         "intent": parsed.intent.value,
         "confidence": parsed.confidence,
-        "reply": response.get("reply", ""),
-        "actions": response.get("actions", []),
-        "executed_actions": response.get("executed_actions", []),
+        "reply": planner_reply,
+        "actions": plan_result.get("actions", []),
+        "executed_actions": executed_actions,
         "project_id": parsed.project_id,
         "error": error,
     }
@@ -468,25 +554,60 @@ async def tool_status() -> dict:
     }
 
 
-@app.get("/activity-feed", tags=["system"])
+@app.get("/activity/feed", tags=["system"])
 async def activity_feed(limit: int = 50, project_id: Optional[str] = None) -> dict:
-    """Return chronological activity/audit entries for the dashboard/feed."""
+    """Return chronological activity/audit entries for the dashboard feed.
+
+    Items are normalized to a consistent shape:
+        { id, kind, summary, created_at, project_id, detail }
+    """
     from db.client import get_decisions, get_commits, get_terminal_commands
 
-    feed = []
+    feed: list[dict] = []
+
     try:
-        feed.extend(get_decisions(project_id=project_id, limit=limit) or [])
-    except Exception:
-        pass
+        decisions = get_decisions(project_id=project_id, limit=limit) or []
+        for d in decisions:
+            feed.append({
+                "id": str(d.get("id", "")),
+                "kind": "decision",
+                "summary": str(d.get("decision", d.get("rationale", "Agent decision"))[:120]),
+                "created_at": str(d.get("decided_at") or d.get("created_at") or ""),
+                "project_id": str(d.get("project_id", project_id or "")),
+                "detail": str(d.get("rationale", "")),
+            })
+    except Exception as exc:
+        logger.debug("activity_feed: decisions unavailable — %s", exc)
+
     try:
-        feed.extend(get_commits(project_id=project_id, limit=limit) or [])
-    except Exception:
-        pass
+        commits = get_commits(project_id=project_id, limit=limit) or []
+        for c in commits:
+            feed.append({
+                "id": str(c.get("id", "")),
+                "kind": "commit",
+                "summary": str(c.get("message", "Git commit")).split("\n")[0][:120],
+                "created_at": str(c.get("committed_at") or c.get("created_at") or ""),
+                "project_id": str(c.get("project_id", project_id or "")),
+                "detail": str(c.get("hash", "")),
+            })
+    except Exception as exc:
+        logger.debug("activity_feed: commits unavailable — %s", exc)
+
     try:
-        feed.extend(get_terminal_commands(project_id=project_id, limit=limit) or [])
-    except Exception:
-        pass
-    feed.sort(key=lambda x: x.get("decided_at") or x.get("committed_at") or x.get("run_at") or "", reverse=True)
+        cmds = get_terminal_commands(project_id=project_id, limit=limit) or []
+        for cmd in cmds:
+            feed.append({
+                "id": str(cmd.get("id", "")),
+                "kind": "terminal",
+                "summary": str(cmd.get("command", "Terminal command"))[:120],
+                "created_at": str(cmd.get("run_at") or cmd.get("created_at") or ""),
+                "project_id": str(cmd.get("project_id", project_id or "")),
+                "detail": "",
+            })
+    except Exception as exc:
+        logger.debug("activity_feed: terminal_commands unavailable — %s", exc)
+
+    feed.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return {"items": feed[:limit]}
 
 

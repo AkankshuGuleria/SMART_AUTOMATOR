@@ -402,7 +402,7 @@ backend/ai/bedrock_client.py
 ### Acceptance Criteria
 
 * Embedding calls wired through invoke_embedding() (Done)
-* Multiple provider support (Groq, Gemini, NVIDIA, Minimax, Ollama) (Done)
+* Multiple provider support (Groq, Gemini, NVIDIA, Minimax, OpenRouter, Cohere, Ollama) (Done)
 * Fallback chain implemented (Done)
 
 ---

@@ -3,10 +3,10 @@
 > Persistent Memory Operating Layer for Developers — an autonomous agent that
 > remembers your project across sessions, restores your workspace, and
 > automates repetitive engineering work using CockroachDB as long-term memory
-> and Ollama (free, local) as its reasoning engine.
+> and cloud APIs such as Groq and Gemini as its preferred reasoning engines.
 >
-> Amazon Bedrock support is included as a commented-out alternative — uncomment
-> the Bedrock section in `backend/ai/bedrock_client.py` when API keys are available.
+> AWS Bedrock remains available as a fallback, and Ollama is only used when
+> the cloud providers and Bedrock are unavailable or fail.
 
 ## Start here (for humans and agents)
 

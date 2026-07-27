@@ -155,9 +155,6 @@ def launch_editor(project_path: str, editor: str = "code") -> bool:
 def launch_browser(url: str) -> bool:
     """
     Open a URL in the default browser.
-
-    Phase 3 implementation:
-        import webbrowser; webbrowser.open(url)
     """
     try:
         import webbrowser
@@ -166,4 +163,71 @@ def launch_browser(url: str) -> bool:
         return True
     except Exception as exc:
         logger.error("os_windows.launch_browser: failed | url=%s error=%s", url, exc)
+        return False
+
+
+# Maps common friendly names to Windows executable names
+_EXECUTABLE_MAP: dict[str, str] = {
+    "code": "code",
+    "vscode": "code",
+    "notepad": "notepad",
+    "notepad++": "notepad++",
+    "calc": "calc",
+    "calculator": "calc",
+    "explorer": "explorer",
+    "chrome": "chrome",
+    "firefox": "firefox",
+    "msedge": "msedge",
+    "edge": "msedge",
+    "wt": "wt",
+    "terminal": "wt",
+    "powershell": "powershell",
+    "cmd": "cmd",
+    "taskmgr": "taskmgr",
+    "task manager": "taskmgr",
+    "slack": "slack",
+    "discord": "discord",
+    "spotify": "spotify",
+    "figma": "figma",
+    "postman": "Postman",
+}
+
+
+def launch_app(app_name: str) -> bool:
+    """
+    Launch a named desktop application by executable name or common alias.
+
+    Looks up `app_name` in the executable map first, then tries it directly
+    as an executable. Falls back gracefully and logs the failure.
+    """
+    exe = _EXECUTABLE_MAP.get(app_name.lower().strip(), app_name.strip())
+    # Handle special protocol URLs (ms-settings: etc.)
+    if exe.startswith("ms-"):
+        try:
+            import webbrowser
+            webbrowser.open(exe)
+            logger.info("os_windows.launch_app: protocol launch | target=%s", exe)
+            return True
+        except Exception as exc:
+            logger.error("os_windows.launch_app: protocol launch failed | target=%s error=%s", exe, exc)
+            return False
+    try:
+        subprocess.Popen(
+            [exe],
+            shell=False,
+            creationflags=subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0,
+        )
+        logger.info("os_windows.launch_app: launched | app=%s exe=%s", app_name, exe)
+        return True
+    except FileNotFoundError:
+        # Try with shell=True as a fallback (handles PATH-dependent programs)
+        try:
+            subprocess.Popen(exe, shell=True)  # noqa: S602
+            logger.info("os_windows.launch_app: shell fallback launched | app=%s", app_name)
+            return True
+        except Exception as exc2:
+            logger.warning("os_windows.launch_app: shell fallback failed | app=%s error=%s", app_name, exc2)
+            return False
+    except Exception as exc:
+        logger.error("os_windows.launch_app: failed | app=%s exe=%s error=%s", app_name, exe, exc)
         return False

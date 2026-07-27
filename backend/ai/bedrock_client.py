@@ -105,58 +105,80 @@ def _invoke_ollama_embedding(text: str) -> list[float] | None:
 def _invoke_gemini_chat(api_key: str, system_prompt: str, user_message: str) -> str | None:
     """Call Gemini API for text generation."""
     import json
+    import urllib.error
     import urllib.request
-    try:
-        payload = json.dumps({
-            "system_instruction": system_prompt,
-            "contents": [{"parts": [{"text": user_message}]}],
-            "generation_config": {
-                "temperature": 0.3,
-                "max_output_tokens": 512,
-            },
-        }).encode("utf-8")
 
-        req = urllib.request.Request(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
-            if resp.status == 200:
-                body = json.loads(resp.read().decode("utf-8"))
-                candidates = body.get("candidates", [])
-                if candidates:
-                    return candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-    except Exception as exc:
-        logger.warning("Gemini chat call failed — %s", exc)
+    candidate_models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+    candidate_versions = ["v1beta", "v1"]
+
+    for model_name in candidate_models:
+        for version in candidate_versions:
+            payload = json.dumps({
+                "contents": [{"role": "user", "parts": [{"text": user_message}]}],
+                "systemInstruction": {"parts": [{"text": system_prompt}]},
+                "generationConfig": {
+                    "temperature": 0.3,
+                    "maxOutputTokens": 512,
+                },
+            }).encode("utf-8")
+
+            try:
+                req = urllib.request.Request(
+                    f"https://generativelanguage.googleapis.com/{version}/models/{model_name}:generateContent?key={api_key}",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+                    if resp.status == 200:
+                        body = json.loads(resp.read().decode("utf-8"))
+                        candidates = body.get("candidates", [])
+                        if candidates:
+                            return candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            except urllib.error.HTTPError as exc:
+                logger.debug("Gemini chat attempt failed for %s/%s — %s", model_name, version, exc)
+                continue
+            except Exception as exc:
+                logger.warning("Gemini chat call failed — %s", exc)
+                continue
+
+    logger.warning("Gemini chat call failed for all configured model candidates")
     return None
 
 
 def _invoke_gemini_embedding(api_key: str, text: str) -> list[float] | None:
     """Call Gemini API for embedding generation."""
     import json
+    import urllib.error
     import urllib.request
-    try:
-        payload = json.dumps({
-            "model": "embedding-001",
-            "content": {"parts": [{"text": text}]},
-        }).encode("utf-8")
 
-        req = urllib.request.Request(
-            f"https://generativelanguage.googleapis.com/v1beta/models/embedding-001:embedContent?key={api_key}",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
-            if resp.status == 200:
-                body = json.loads(resp.read().decode("utf-8"))
-                values = body.get("embedding", {}).get("values", [])
-                if values:
-                    return values
-    except Exception as exc:
-        logger.warning("Gemini embedding call failed — %s", exc)
+    candidate_models = ["embedding-001", "text-embedding-004"]
+    for model_name in candidate_models:
+        try:
+            payload = json.dumps({
+                "content": {"parts": [{"text": text}]},
+            }).encode("utf-8")
+
+            req = urllib.request.Request(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:embedContent?key={api_key}",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+                if resp.status == 200:
+                    body = json.loads(resp.read().decode("utf-8"))
+                    values = body.get("embedding", {}).get("values", [])
+                    if values:
+                        return values
+        except urllib.error.HTTPError as exc:
+            logger.debug("Gemini embedding attempt failed for %s — %s", model_name, exc)
+            continue
+        except Exception as exc:
+            logger.warning("Gemini embedding call failed — %s", exc)
+            continue
+
+    logger.warning("Gemini embedding call failed for all configured model candidates")
     return None
 
 
@@ -196,14 +218,112 @@ def _invoke_minimax_chat(api_key: str, system_prompt: str, user_message: str) ->
     return None
 
 
-# ─── NVIDIA API Configuration ───────────────────────────────────────────
+# ─── OpenRouter API Configuration ──────────────────────────────
+def _invoke_openrouter_chat(api_key: str, system_prompt: str, user_message: str) -> str | None:
+    """Call OpenRouter API for text generation."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    candidate_models = [
+        "openai/gpt-4o-mini",
+        "anthropic/claude-3.5-sonnet",
+        "google/gemini-2.0-flash",
+        "meta-llama/llama-3.3-70b-instruct",
+        "mistralai/mistral-small-3.1-24b-instruct",
+    ]
+    for model_name in candidate_models:
+        payload = json.dumps({
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "max_tokens": 512,
+            "temperature": 0.3,
+        }).encode("utf-8")
+
+        try:
+            req = urllib.request.Request(
+                "https://openrouter.ai/api/v1/chat/completions",
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                    "HTTP-Referer": "http://localhost:5173",
+                    "X-Title": "AUTOMATA",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+                if resp.status == 200:
+                    body = json.loads(resp.read().decode("utf-8"))
+                    choices = body.get("choices", [])
+                    if choices:
+                        return choices[0].get("message", {}).get("content", "")
+        except urllib.error.HTTPError as exc:
+            logger.debug("OpenRouter chat attempt failed for %s — %s", model_name, exc)
+            continue
+        except Exception as exc:
+            logger.warning("OpenRouter chat call failed — %s", exc)
+            continue
+
+    logger.warning("OpenRouter chat call failed for all configured model candidates")
+    return None
+
+
+# ─── Cohere API Configuration ────────────────────────────
+def _invoke_cohere_chat(api_key: str, system_prompt: str, user_message: str) -> str | None:
+    """Call Cohere API for text generation."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    candidate_models = ["command-a-03-2025", "command-r-plus", "command-r"]
+    for model_name in candidate_models:
+        payload = json.dumps({
+            "model": model_name,
+            "message": user_message,
+            "preamble": system_prompt,
+            "max_tokens": 512,
+            "temperature": 0.3,
+        }).encode("utf-8")
+
+        try:
+            req = urllib.request.Request(
+                "https://api.cohere.ai/v1/chat",
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+                if resp.status == 200:
+                    body = json.loads(resp.read().decode("utf-8"))
+                    text = body.get("text", "")
+                    if text:
+                        return text
+        except urllib.error.HTTPError as exc:
+            logger.debug("Cohere chat attempt failed for %s — %s", model_name, exc)
+            continue
+        except Exception as exc:
+            logger.warning("Cohere chat call failed — %s", exc)
+            continue
+
+    logger.warning("Cohere chat call failed for all configured model candidates")
+    return None
+
+
+# ─── NVIDIA API Configuration ───────────────────────────────────
 def _invoke_nvidia_chat(api_key: str, system_prompt: str, user_message: str) -> str | None:
-    """Call NVIDIA API for text generation (Minimax model via NVIDIA endpoint)."""
+    """Call NVIDIA NIM API for text generation (Nemotron-3-Ultra-550B)."""
     import json
     import urllib.request
     try:
         payload = json.dumps({
-            "model": "minimaxai/minimax-m3",
+            "model": "nvidia/nemotron-3-ultra-550b-a55b",
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
@@ -238,10 +358,13 @@ def _invoke_nvidia_chat(api_key: str, system_prompt: str, user_message: str) -> 
 def _invoke_groq_chat(api_key: str, system_prompt: str, user_message: str) -> str | None:
     """Call Groq API for text generation."""
     import json
+    import urllib.error
     import urllib.request
-    try:
+
+    candidate_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-70b-8192"]
+    for model_name in candidate_models:
         payload = json.dumps({
-            "model": "llama-3.1-8b-instant",
+            "model": model_name,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
@@ -250,53 +373,72 @@ def _invoke_groq_chat(api_key: str, system_prompt: str, user_message: str) -> st
             "temperature": 0.3,
         }).encode("utf-8")
 
-        req = urllib.request.Request(
-            "https://api.groq.com/openai/v1/chat/completions",
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
-            if resp.status == 200:
-                body = json.loads(resp.read().decode("utf-8"))
-                choices = body.get("choices", [])
-                if choices:
-                    return choices[0].get("message", {}).get("content", "")
-    except Exception as exc:
-        logger.warning("Groq chat call failed — %s", exc)
+        try:
+            req = urllib.request.Request(
+                "https://api.groq.com/openai/v1/chat/completions",
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                    "User-Agent": "AUTOMATA/1.0",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+                if resp.status == 200:
+                    body = json.loads(resp.read().decode("utf-8"))
+                    choices = body.get("choices", [])
+                    if choices:
+                        return choices[0].get("message", {}).get("content", "")
+        except urllib.error.HTTPError as exc:
+            logger.debug("Groq chat attempt failed for %s — %s", model_name, exc)
+            continue
+        except Exception as exc:
+            logger.warning("Groq chat call failed — %s", exc)
+            continue
+
+    logger.warning("Groq chat call failed for all configured model candidates")
     return None
 
 
 def _invoke_groq_embedding(api_key: str, text: str) -> list[float] | None:
     """Call Groq API for embedding generation."""
     import json
+    import urllib.error
     import urllib.request
-    try:
+
+    candidate_models = ["llama-3.2-1b-preview", "llama-3.1-8b-instant"]
+    for model_name in candidate_models:
         payload = json.dumps({
-            "model": "embedding-model",
+            "model": model_name,
             "input": text,
         }).encode("utf-8")
 
-        req = urllib.request.Request(
-            "https://api.groq.com/openai/v1/embeddings",
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
-            if resp.status == 200:
-                body = json.loads(resp.read().decode("utf-8"))
-                data = body.get("data", [])
-                if data:
-                    return data[0].get("embedding", [])
-    except Exception as exc:
-        logger.warning("Groq embedding call failed — %s", exc)
+        try:
+            req = urllib.request.Request(
+                "https://api.groq.com/openai/v1/embeddings",
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                    "User-Agent": "AUTOMATA/1.0",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+                if resp.status == 200:
+                    body = json.loads(resp.read().decode("utf-8"))
+                    data = body.get("data", [])
+                    if data:
+                        return data[0].get("embedding", [])
+        except urllib.error.HTTPError as exc:
+            logger.debug("Groq embedding attempt failed for %s — %s", model_name, exc)
+            continue
+        except Exception as exc:
+            logger.warning("Groq embedding call failed — %s", exc)
+            continue
+
+    logger.warning("Groq embedding call failed for all configured model candidates")
     return None
 
 
@@ -308,10 +450,32 @@ def _invoke_bedrock_chat(
 ) -> str | None:
     """Call Amazon Bedrock to generate a grounded response."""
     import json
-    import urllib.request
 
     from config import settings
     try:
+        import boto3
+        from botocore.config import Config
+    except ImportError:
+        logger.warning("Bedrock chat failed — boto3 not installed")
+        return None
+
+    if not settings.aws_region or not settings.aws_bedrock_model_id:
+        logger.warning("Bedrock chat failed — AWS region or model ID not configured")
+        return None
+
+    try:
+        client = boto3.client(
+            "bedrock-runtime",
+            region_name=settings.aws_region,
+            aws_access_key_id=settings.aws_access_key_id or None,
+            aws_secret_access_key=settings.aws_secret_access_key or None,
+            config=Config(
+                retries={"max_attempts": 2, "mode": "standard"},
+                connect_timeout=10,
+                read_timeout=30,
+            ),
+        )
+
         payload = json.dumps({
             "messages": [{"role": "user", "content": [{"text": user_message}]}],
             "system": [{"text": system_prompt}],
@@ -319,25 +483,23 @@ def _invoke_bedrock_chat(
             "temperature": 0.3,
         }).encode("utf-8")
 
-        req = urllib.request.Request(
-            f"https://bedrock-runtime.{settings.aws_region}.amazonaws.com/model/amazon.titan-text-lite-v1/invoke",
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"AWS4-HMAC-SHA256 Credential={settings.aws_access_key_id}/{date}/{settings.aws_region}/bedrock/aws4_request",
-            },
-            method="POST",
+        response = client.invoke_model(
+            modelId=settings.aws_bedrock_model_id,
+            body=payload,
+            accept="application/json",
+            contentType="application/json",
         )
-        with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
-            if resp.status == 200:
-                body = json.loads(resp.read().decode("utf-8"))
-                content = (
-                    body.get("output", {})
-                    .get("message", {})
-                    .get("content", [{}])[0]
-                    .get("text", "")
-                )
-                return content
+
+        body = json.loads(response["body"].read().decode("utf-8"))
+        content = (
+            body.get("outputs", [])[0]
+            .get("message", {})
+            .get("content", [{}])[0]
+            .get("text", "")
+            if body.get("outputs")
+            else ""
+        )
+        return content or None
     except Exception as exc:
         logger.warning("Bedrock chat call failed — %s", exc)
     return None
@@ -347,69 +509,105 @@ def invoke_reasoning(
     system_prompt: str,
     user_message: str,
     retrieved_memories: list[dict] | None = None,
+    reasoning_mode: str | None = None,
 ) -> str | None:
     """Generate a grounded response using the configured LLM backend."""
     from config import settings
 
     grounded_prompt = _build_grounded_prompt(system_prompt, user_message, retrieved_memories)
 
-    # Try Bedrock first (if configured)
-    if settings.bedrock_available:
-        logger.info("LLM fallback: trying Bedrock (%s)", settings.aws_bedrock_model_id)
-        result = _invoke_bedrock_chat(system_prompt, grounded_prompt, retrieved_memories)
-        if result:
-            logger.info("LLM fallback: Bedrock succeeded")
-            return result
-        logger.warning("LLM fallback: Bedrock failed")
+    mode = (reasoning_mode or getattr(settings, "reasoning_mode", "auto")).lower()
 
-    # Try NVIDIA (if configured)
-    nvidia_key = getattr(settings, "nvidia_api_key", "")
-    if nvidia_key:
-        logger.info("LLM fallback: trying NVIDIA")
-        result = _invoke_nvidia_chat(nvidia_key, system_prompt, grounded_prompt)
+    def _try_provider(name: str, fn, api_key: str | None = None) -> str | None:
+        if not api_key and name not in {"bedrock", "ollama"}:
+            return None
+        logger.info("LLM: trying %s", name)
+        if name == "bedrock":
+            result = fn(system_prompt, grounded_prompt, retrieved_memories)
+        elif name == "ollama":
+            result = fn(system_prompt, grounded_prompt)
+        else:
+            result = fn(api_key, system_prompt, grounded_prompt)
         if result:
-            logger.info("LLM fallback: NVIDIA succeeded")
+            logger.info("LLM: %s succeeded", name)
             return result
-        logger.warning("LLM fallback: NVIDIA failed")
+        logger.warning("LLM: %s failed", name)
+        return None
 
-    # Try Groq (if configured)
-    groq_key = getattr(settings, "groq_api_key", "")
-    if groq_key:
-        logger.info("LLM fallback: trying Groq")
-        result = _invoke_groq_chat(groq_key, system_prompt, grounded_prompt)
-        if result:
-            logger.info("LLM fallback: Groq succeeded")
-            return result
-        logger.warning("LLM fallback: Groq failed")
+    def _get_local_help() -> str:
+        return (
+            "Ollama is not available. Install it from https://ollama.com/ and run:\n"
+            "  1. ollama pull qwen2.5:7b\n"
+            "  2. ollama serve"
+        )
 
-    # Try Gemini (if configured)
-    gemini_key = getattr(settings, "gemini_api_key", "")
-    if gemini_key:
-        logger.info("LLM fallback: trying Gemini")
-        result = _invoke_gemini_chat(gemini_key, system_prompt, grounded_prompt)
-        if result:
-            logger.info("LLM fallback: Gemini succeeded")
-            return result
-        logger.warning("LLM fallback: Gemini failed")
+    if mode == "local":
+        if not _get_ollama_available():
+            logger.warning("invoke_reasoning: local mode selected but Ollama is unavailable")
+            print(_get_local_help())
+            return None
+        result = _try_provider("ollama", _invoke_ollama_chat)
+        return result
 
-    # Try Minimax (if configured)
-    minimax_key = getattr(settings, "minimax_api_key", "")
-    if minimax_key:
-        logger.info("LLM fallback: trying Minimax")
-        result = _invoke_minimax_chat(minimax_key, system_prompt, grounded_prompt)
-        if result:
-            logger.info("LLM fallback: Minimax succeeded")
-            return result
-        logger.warning("LLM fallback: Minimax failed")
+    if mode == "cloud":
+        groq_key = getattr(settings, "groq_api_key", "")
+        gemini_key = getattr(settings, "gemini_api_key", "")
+        nvidia_key = getattr(settings, "nvidia_api_key", "")
+        minimax_key = getattr(settings, "minimax_api_key", "")
+        openrouter_key = getattr(settings, "openrouter_api_key", "")
+        cohere_key = getattr(settings, "cohere_api_key", "")
 
-    # Fallback to Ollama (free, local)
+        for provider_name, api_key, func in [
+            ("Groq", groq_key, _invoke_groq_chat),
+            ("OpenRouter", openrouter_key, _invoke_openrouter_chat),
+            ("Gemini", gemini_key, _invoke_gemini_chat),
+            ("Cohere", cohere_key, _invoke_cohere_chat),
+            ("NVIDIA", nvidia_key, _invoke_nvidia_chat),
+            ("Minimax", minimax_key, _invoke_minimax_chat),
+        ]:
+            if api_key:
+                result = _try_provider(provider_name, func, api_key)
+                if result:
+                    return result
+
+        if settings.bedrock_available:
+            result = _try_provider("bedrock", _invoke_bedrock_chat)
+            if result:
+                return result
+
+        logger.warning("invoke_reasoning: No cloud LLM backend available")
+        return None
+
+    # auto mode: try Ollama first (free, local), then cloud providers, then Bedrock
     if _get_ollama_available():
-        logger.info("LLM fallback: trying Ollama (%s)", OLLAMA_MODEL)
-        result = _invoke_ollama_chat(system_prompt, grounded_prompt)
+        result = _try_provider("ollama", _invoke_ollama_chat)
         if result:
-            logger.info("LLM fallback: Ollama succeeded")
             return result
-        logger.warning("LLM fallback: Ollama failed")
+
+    groq_key = getattr(settings, "groq_api_key", "")
+    gemini_key = getattr(settings, "gemini_api_key", "")
+    nvidia_key = getattr(settings, "nvidia_api_key", "")
+    minimax_key = getattr(settings, "minimax_api_key", "")
+    openrouter_key = getattr(settings, "openrouter_api_key", "")
+    cohere_key = getattr(settings, "cohere_api_key", "")
+
+    for provider_name, api_key, func in [
+        ("Groq", groq_key, _invoke_groq_chat),
+        ("OpenRouter", openrouter_key, _invoke_openrouter_chat),
+        ("Gemini", gemini_key, _invoke_gemini_chat),
+        ("Cohere", cohere_key, _invoke_cohere_chat),
+        ("NVIDIA", nvidia_key, _invoke_nvidia_chat),
+        ("Minimax", minimax_key, _invoke_minimax_chat),
+    ]:
+        if api_key:
+            result = _try_provider(provider_name, func, api_key)
+            if result:
+                return result
+
+    if settings.bedrock_available:
+        result = _try_provider("bedrock", _invoke_bedrock_chat)
+        if result:
+            return result
 
     logger.warning("invoke_reasoning: No LLM backend available")
     return None
@@ -419,7 +617,62 @@ def invoke_embedding(text: str) -> list[float] | None:
     """Generate a vector embedding for the given text."""
     from config import settings
 
-    # Try Groq embedding (if configured)
+    mode = getattr(settings, "reasoning_mode", "auto").lower()
+
+    # Local mode: only Ollama
+    if mode == "local":
+        if _get_ollama_available():
+            logger.info("Embedding: trying Ollama (%s)", OLLAMA_EMBEDDING_MODEL)
+            result = _invoke_ollama_embedding(text)
+            if result:
+                logger.info("Embedding: Ollama succeeded")
+                return result
+            logger.warning("Embedding: Ollama failed")
+        logger.warning("invoke_embedding: local mode but Ollama unavailable")
+        return None
+
+    # Cloud mode: try cloud embeddings only
+    if mode == "cloud":
+        groq_emb_key = getattr(settings, "groq_embedding_api_key", "")
+        groq_key = getattr(settings, "groq_api_key", "")
+        if groq_emb_key:
+            logger.info("Embedding: trying Groq")
+            result = _invoke_groq_embedding(groq_emb_key, text)
+            if result:
+                logger.info("Embedding: Groq succeeded")
+                return result
+            logger.warning("Embedding: Groq failed")
+        elif groq_key:
+            logger.info("Embedding: trying Groq (chat key)")
+            result = _invoke_groq_embedding(groq_key, text)
+            if result:
+                logger.info("Embedding: Groq (chat key) succeeded")
+                return result
+            logger.warning("Embedding: Groq (chat key) failed")
+
+        gemini_key = getattr(settings, "gemini_api_key", "")
+        if gemini_key:
+            logger.info("Embedding: trying Gemini")
+            result = _invoke_gemini_embedding(gemini_key, text)
+            if result:
+                logger.info("Embedding: Gemini succeeded")
+                return result
+            logger.warning("Embedding: Gemini failed")
+
+        logger.warning("invoke_embedding: No cloud embedding backend available")
+        return None
+
+    # Auto mode: Ollama first, then cloud embeddings
+    # Primary: Ollama (free, local)
+    if _get_ollama_available():
+        logger.info("Embedding: trying Ollama (%s)", OLLAMA_EMBEDDING_MODEL)
+        result = _invoke_ollama_embedding(text)
+        if result:
+            logger.info("Embedding: Ollama succeeded")
+            return result
+        logger.warning("Embedding: Ollama failed")
+
+    # Try cloud embeddings
     groq_emb_key = getattr(settings, "groq_embedding_api_key", "")
     groq_key = getattr(settings, "groq_api_key", "")
     if groq_emb_key:
@@ -430,7 +683,6 @@ def invoke_embedding(text: str) -> list[float] | None:
             return result
         logger.warning("Embedding fallback: Groq failed")
     elif groq_key:
-        # Fallback to chat key if embedding key not set
         logger.info("Embedding fallback: trying Groq (chat key)")
         result = _invoke_groq_embedding(groq_key, text)
         if result:
@@ -438,7 +690,6 @@ def invoke_embedding(text: str) -> list[float] | None:
             return result
         logger.warning("Embedding fallback: Groq (chat key) failed")
 
-    # Try Gemini (if configured)
     gemini_key = getattr(settings, "gemini_api_key", "")
     if gemini_key:
         logger.info("Embedding fallback: trying Gemini")
@@ -447,15 +698,6 @@ def invoke_embedding(text: str) -> list[float] | None:
             logger.info("Embedding fallback: Gemini succeeded")
             return result
         logger.warning("Embedding fallback: Gemini failed")
-
-    # Fallback to Ollama (free, local)
-    if _get_ollama_available():
-        logger.info("Embedding fallback: trying Ollama (%s)", OLLAMA_EMBEDDING_MODEL)
-        result = _invoke_ollama_embedding(text)
-        if result:
-            logger.info("Embedding fallback: Ollama succeeded")
-            return result
-        logger.warning("Embedding fallback: Ollama failed")
 
     logger.warning("invoke_embedding: No embedding backend available")
     return None

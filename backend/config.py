@@ -31,11 +31,14 @@ class Settings:
     embedding_model_id: str = field(default="")
     embedding_dimension: int = field(default=0)
     log_level: str = field(default="INFO")
+    reasoning_mode: str = field(default="auto")
     nvidia_api_key: str = field(default="")
     groq_api_key: str = field(default="")
     groq_embedding_api_key: str = field(default="")
     gemini_api_key: str = field(default="")
     minimax_api_key: str = field(default="")
+    openrouter_api_key: str = field(default="")
+    cohere_api_key: str = field(default="")
     api_key: str = field(default="")
 
     @property
@@ -44,7 +47,7 @@ class Settings:
 
     @property
     def bedrock_available(self) -> bool:
-        return bool(self.aws_region and self.aws_bedrock_model_id and self.aws_access_key_id)
+        return bool(self.aws_region and self.aws_bedrock_model_id)
 
     @property
     def ollama_available(self) -> bool:
@@ -72,11 +75,14 @@ def _load_settings() -> Settings:
         embedding_model_id=os.getenv("EMBEDDING_MODEL_ID", ""),
         embedding_dimension=dim,
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        reasoning_mode=(os.getenv("REASONING_MODE", "auto") or "auto").lower(),
         nvidia_api_key=os.getenv("NVIDIA_API_KEY", ""),
         groq_api_key=os.getenv("GROQ_API_KEY", ""),
         groq_embedding_api_key=os.getenv("GROQ_EMBEDDING_API_KEY", ""),
         gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
         minimax_api_key=os.getenv("MINIMAX_API_KEY", ""),
+        openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
+        cohere_api_key=os.getenv("COHERE_API_KEY", ""),
         api_key=os.getenv("API_KEY", ""),
         ollama_embedding_model=os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text"),
     )

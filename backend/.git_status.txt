@@ -1,0 +1,71 @@
+=== git status ===
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   PROJECT.md
+	modified:   README.md
+	modified:   TASK.md
+	modified:   backend/.env.example
+	modified:   backend/agent_actions.py
+	modified:   backend/ai/bedrock_client.py
+	modified:   backend/api/server.py
+	modified:   backend/automation/os_windows.py
+	modified:   backend/config.py
+	modified:   backend/decision_engine/intent_parser.py
+	modified:   backend/decision_engine/planner.py
+	modified:   backend/memory/capture.py
+	modified:   backend/seed_project.py
+	modified:   frontend/src-tauri/tauri.conf.json
+	modified:   frontend/src/App.css
+	modified:   frontend/src/App.tsx
+	modified:   frontend/src/components/ActivityFeed.tsx
+	modified:   frontend/src/components/ChatPanel.tsx
+	modified:   frontend/src/components/MorningBriefWrapper.tsx
+	modified:   frontend/src/index.css
+	modified:   frontend/src/lib/api.ts
+	modified:   frontend/vite.config.ts
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	backend/test_intent.py
+	backend/tests/test_reasoning_provider_order.py
+	backend/tmp_api_probe.py
+	backend/tmp_probe_api_keys.py
+	check_settings.py
+	final_response.txt
+	plan.md
+	problem.md
+	scripts/start_dev.ps1
+	temp.py
+	test_ollama.py
+	test_settings.py
+
+no changes added to commit (use "git add" and/or "git commit -a")
+
+=== git diff --stat ===
+ PROJECT.md                                      |   7 +-
+ README.md                                       |   6 +-
+ TASK.md                                         |   2 +-
+ backend/.env.example                            |  22 +-
+ backend/agent_actions.py                        | 346 +++++++++++++
+ backend/ai/bedrock_client.py                    | 514 ++++++++++++------
+ backend/api/server.py                           | 178 +++++--
+ backend/automation/os_windows.py                |  70 ++-
+ backend/config.py                               |   8 +-
+ backend/decision_engine/intent_parser.py        | 221 +++++++-
+ backend/decision_engine/planner.py              | 663 +++++++++++++++---------
+ backend/memory/capture.py                       |  17 +-
+ backend/seed_project.py                         |   2 +-
+ frontend/src-tauri/tauri.conf.json              |   2 +-
+ frontend/src/App.css                            | 185 +------
+ frontend/src/App.tsx                            | 240 ++++++---
+ frontend/src/components/ActivityFeed.tsx        | 141 ++++-
+ frontend/src/components/ChatPanel.tsx           | 422 +++++++++++----
+ frontend/src/components/MorningBriefWrapper.tsx |  35 +-
+ frontend/src/index.css                          | 415 +++++++++++----
+ frontend/src/lib/api.ts                         |  10 +-
+ frontend/vite.config.ts                         |  22 +-
+ 22 files changed, 2584 insertions(+), 944 deletions(-)

@@ -52,6 +52,352 @@ def _invoke_reasoning(
 
 # ─── Actions ──────────────────────────────────────────────────────────────────
 
+# Maps friendly app names to launch targets (app path or URL).
+# Keys are matched case-insensitively via substring check.
+_APP_NAME_MAP: dict[str, str] = {
+    # Browsers
+    "browser": "",  # default browser, no URL
+    "chrome": "chrome",
+    "firefox": "firefox",
+    "edge": "msedge",
+    "safari": "safari",
+    "opera": "opera",
+    "brave": "brave",
+    # Editors & IDEs
+    "vscode": "code",
+    "vs code": "code",
+    "vs-code": "code",
+    "code": "code",
+    "visual studio code": "code",
+    "intellij": "idea64",
+    "intellij idea": "idea64",
+    "idea": "idea64",
+    "pycharm": "pycharm64",
+    "pycharm community": "pycharm64",
+    "pycharm professional": "pycharm64",
+    "eclipse": "eclipse",
+    "android studio": "studio64",
+    "xcode": "xcode",
+    "sublime": "sublime_text",
+    "sublime text": "sublime_text",
+    "notepad": "notepad",
+    "notepad++": "notepad++",
+    # Dev tools
+    "terminal": "wt",
+    "windows terminal": "wt",
+    "powershell": "powershell",
+    "pwsh": "pwsh",
+    "cmd": "cmd",
+    "command prompt": "cmd",
+    "git bash": "git-bash",
+    "gitbash": "git-bash",
+    "git": "git-bash",
+    "docker": "docker-desktop",
+    "kubernetes": "kubernetes",
+    "kubectl": "kubectl",
+    "ansible": "ansible",
+    "terraform": "terraform",
+    "vmware": "vmware",
+    "virtualbox": "virtualbox",
+    # Communication & productivity
+    "slack": "slack",
+    "discord": "discord",
+    "teams": "teams",
+    "zoom": "zoom",
+    "teams": "teams",
+    "outlook": "outlook",
+    "onenote": "onenote",
+    "onenote": "onenote",
+    "onenote web": "https://www.onenote.com",
+    # Media
+    "spotify": "spotify",
+    "youtube": "https://youtube.com",
+    "yt": "https://youtube.com",
+    "vlc": "vlc",
+    "spotify web": "https://open.spotify.com",
+    # Design & creative
+    "figma": "https://figma.com",
+    "postman": "https://web.postman.co",
+    "canva": "https://canva.com",
+    "photoshop": "photoshop",
+    "illustrator": "illustrator",
+    # System
+    "task manager": "taskmgr",
+    "taskmanager": "taskmgr",
+    "settings": "ms-settings:",
+    "control panel": "control",
+    "file explorer": "explorer",
+    "explorer": "explorer",
+    "calculator": "calc",
+    "calc": "calc",
+    # AI / Chat
+    "chatgpt": "https://chatgpt.com",
+    "chat gpt": "https://chatgpt.com",
+    "chat gpt app": "https://chatgpt.com",
+    "claude": "https://claude.ai",
+    "claude ai": "https://claude.ai",
+    "openai": "https://platform.openai.com",
+    "openai chat": "https://chatgpt.com",
+    "perplexity": "https://perplexity.ai",
+    "perplexity ai": "https://perplexity.ai",
+    "gemini": "https://gemini.google.com",
+    "google ai": "https://gemini.google.com",
+    "github copilot": "https://github.com/features/copilot",
+    "copilot": "https://github.com/features/copilot",
+    # Development platforms
+    "github": "https://github.com",
+    "gitlab": "https://gitlab.com",
+    "bitbucket": "https://bitbucket.org",
+    "stack overflow": "https://stackoverflow.com",
+    "stackoverflow": "https://stackoverflow.com",
+    "docs": "https://docs.google.com",
+    "google docs": "https://docs.google.com",
+    "drive": "https://drive.google.com",
+    "google drive": "https://drive.google.com",
+    # Cloud & DevOps
+    "aws": "https://console.aws.amazon.com",
+    "aws console": "https://console.aws.amazon.com",
+    "azure": "https://portal.azure.com",
+    "azure portal": "https://portal.azure.com",
+    "gcp": "https://console.cloud.google.com",
+    "google cloud": "https://console.cloud.google.com",
+    "cloud": "https://console.cloud.google.com",
+}
+
+# Fuzzy name mappings for common variations
+_FUZZY_ALIASES: dict[str, str] = {
+    "chat gpt": "chatgpt",
+    "chatgpt app": "chatgpt",
+    "gpt": "chatgpt",
+    "openai chat": "chatgpt",
+    "google gemini": "gemini",
+    "google ai": "gemini",
+    "visual studio": "vscode",
+    "vs code": "vscode",
+    "vs-code": "vscode",
+    "vscode": "vscode",
+    "intellij idea": "intellij",
+    "pycharm community edition": "pycharm",
+    "pycharm professional edition": "pycharm",
+    "android studio": "android studio",
+    "web browser": "browser",
+    "file manager": "file explorer",
+    "task manager": "task manager",
+    "control panel": "settings",
+    "video player": "vlc",
+    "music player": "spotify",
+    "spotify web player": "spotify web",
+    "youtube music": "https://music.youtube.com",
+    "google docs": "docs",
+    "google sheets": "https://sheets.google.com",
+    "google slides": "https://slides.google.com",
+}
+
+
+def _resolve_app_target(raw: str) -> tuple[str, str]:
+    """Return (kind, target) where kind is 'url', 'editor', or 'app'."""
+    raw = raw.strip()
+    lowered = raw.lower()
+
+    # Strip leading filler words
+    for prefix in ("open ", "launch ", "start ", "navigate to ", "go to ", "visit "):
+        if lowered.startswith(prefix):
+            raw = raw[len(prefix):].strip()
+            lowered = raw.lower()
+            break
+
+    # Check fuzzy aliases first (e.g. "chat gpt" → "chatgpt")
+    for alias, canonical in _FUZZY_ALIASES.items():
+        if alias in lowered:
+            lowered = lowered.replace(alias, canonical)
+            raw = raw.replace(alias, canonical)
+            break
+
+    # Check map first (longest keys first to avoid partial matches)
+    for key in sorted(_APP_NAME_MAP.keys(), key=len, reverse=True):
+        if key in lowered:
+            target = _APP_NAME_MAP[key]
+            return ("url" if target.startswith("http") else "app"), target or raw
+
+    # If it looks like a URL
+    if raw.startswith(("http://", "https://", "www.")):
+        url = raw if raw.startswith("http") else f"https://{raw}"
+        return "url", url
+
+    # Treat as an app name / executable
+    return "app", lowered
+
+
+def open_app_or_url(target: str) -> dict[str, Any]:
+    """Open a browser URL or a named desktop application."""
+    from automation.os_windows import launch_browser, launch_app
+
+    kind, resolved = _resolve_app_target(target)
+    if kind == "url":
+        success = launch_browser(resolved)
+        return {
+            "action": "open_browser",
+            "target": resolved,
+            "success": success,
+            "message": f"Opened {resolved} in the default browser." if success
+                       else f"Failed to open browser for {resolved}.",
+        }
+    else:
+        success = launch_app(resolved)
+        return {
+            "action": "open_app",
+            "target": resolved,
+            "success": success,
+            "message": f"Launched {resolved}." if success
+                       else f"Could not find or launch '{resolved}'. Check the app name.",
+        }
+
+
+def execute_system_command(message: str) -> dict[str, Any]:
+    """Execute a system-level command (install, setup, env vars) with safety checks."""
+    from automation.command_executor import CommandExecutor
+
+    # Determine the command to run based on the user's message
+    command = _parse_system_command(message)
+    if not command:
+        return {
+            "action": "system_command",
+            "success": False,
+            "message": "I couldn't determine what system command to run. Try something like 'install Java JDK' or 'setup dev environment'.",
+        }
+
+    # Check if this is a dangerous operation that needs confirmation
+    dangerous_patterns = [
+        "install", "uninstall", "remove", "delete", "format", "shutdown",
+        "set env", "set path", "set java", "set variable", "configure system",
+    ]
+    is_dangerous = any(p in message.lower() for p in dangerous_patterns)
+
+    if is_dangerous:
+        return {
+            "action": "system_command",
+            "command": command,
+            "success": False,
+            "suggested": True,
+            "message": (
+                f"I can run this command, but it will make system-level changes. "
+                f"Please confirm: `{command}`"
+            ),
+            "undo_hint": "Reverse the command or restore system state manually",
+        }
+
+    executor = CommandExecutor(allow_auto_execute=True)
+    result = executor.execute(command, context="system_command")
+
+    return {
+        "action": "system_command",
+        "command": command,
+        "success": result.status == "ok",
+        "message": (
+            f"Command executed successfully: `{command}`"
+            if result.status == "ok"
+            else f"Command failed: `{command}` — {result.stderr or result.status}"
+        ),
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "exit_code": result.exit_code,
+    }
+
+
+def _parse_system_command(message: str) -> str:
+    """Parse a user message to determine the system command to run."""
+    lowered = message.lower().strip()
+
+    # Java/JDK installation
+    if any(k in lowered for k in ["java", "jdk", "java install", "jdk install"]):
+        return "winget install Microsoft.JavaRuntime --accept-package-agreements"
+
+    # Node.js installation
+    if any(k in lowered for k in ["node", "node.js", "nodejs", "node install"]):
+        return "winget install OpenJS.NodeJS.LTS --accept-package-agreements"
+
+    # Python installation
+    if any(k in lowered for k in ["python", "python install", "python3"]):
+        return "winget install Python.Python.3.12 --accept-package-agreements"
+
+    # Git installation
+    if any(k in lowered for k in ["git", "git install"]):
+        return "winget install Git.Git --accept-package-agreements"
+
+    # Docker installation
+    if any(k in lowered for k in ["docker", "docker install"]):
+        return "winget install Docker.DockerDesktop --accept-package-agreements"
+
+    # VS Code installation
+    if any(k in lowered for k in ["vscode", "visual studio code", "vs code install"]):
+        return "winget install Microsoft.VisualStudioCode --accept-package-agreements"
+
+    # IntelliJ IDEA installation
+    if any(k in lowered for k in ["intellij", "idea install", "jetbrains"]):
+        return "winget install JetBrains.IntelliJIDEA.Community --accept-package-agreements"
+
+    # Chrome installation
+    if any(k in lowered for k in ["chrome", "google chrome", "browser install"]):
+        return "winget install Google.Chrome --accept-package-agreements"
+
+    # General package manager install
+    if "winget install" in lowered:
+        return message.strip()
+
+    # pip install
+    if "pip install" in lowered:
+        return message.strip()
+
+    # npm install
+    if "npm install" in lowered:
+        return message.strip()
+
+    # choco install
+    if "choco install" in lowered:
+        return message.strip()
+
+    # Environment variable setup
+    if any(k in lowered for k in ["set env", "set path", "set java", "set variable"]):
+        # Extract the variable name and value
+        return f"setx {message}"
+
+    # Dev environment setup
+    if any(k in lowered for k in ["dev env", "dev environment", "setup dev", "setup env"]):
+        return "winget install Microsoft.VisualStudioCode Git.Git Python.Python.3.12 --accept-package-agreements"
+
+    return message.strip()
+
+
+def run_tests_action(project_id: str, command: str = "") -> dict[str, Any]:
+    """Suggest running tests for the project, returning the suggested command."""
+    project = _get_project(project_id)
+    if project is None:
+        return {"error": "Project not found", "suggested_command": None}
+
+    repo_path = project.get("repo_path", "")
+
+    # Auto-detect test runner if no command provided
+    if not command:
+        detected = "pytest"  # default
+        if repo_path:
+            rp = Path(repo_path)
+            if (rp / "package.json").exists():
+                detected = "npm test"
+            elif (rp / "Cargo.toml").exists():
+                detected = "cargo test"
+            elif any(rp.glob("*.csproj")):
+                detected = "dotnet test"
+        command = detected
+
+    return {
+        "project_id": project_id,
+        "suggested_command": command,
+        "repo_path": repo_path,
+        "message": f"Run `{command}` in `{repo_path}` to execute tests.",
+        "error": None,
+    }
+
+
 def explain_repository(project_id: str, repo_path: str) -> dict[str, Any]:
     from explain_repository import synthesize_explanation
     recent = _recent_memories(project_id)
