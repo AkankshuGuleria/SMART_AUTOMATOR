@@ -200,7 +200,14 @@ def _resolve_app_target(raw: str) -> tuple[str, str]:
     lowered = raw.lower()
 
     # Strip leading filler words
-    for prefix in ("open ", "launch ", "start ", "navigate to ", "go to ", "visit "):
+    for prefix in ("open ", "run ", "launch ", "start ", "navigate to ", "go to ", "visit "):
+        if lowered.startswith(prefix):
+            raw = raw[len(prefix):].strip()
+            lowered = raw.lower()
+            break
+
+    # Strip "browser to " prefix for browser intent messages
+    for prefix in ("browser to ", "open browser to ", "launch browser to "):
         if lowered.startswith(prefix):
             raw = raw[len(prefix):].strip()
             lowered = raw.lower()
@@ -219,8 +226,12 @@ def _resolve_app_target(raw: str) -> tuple[str, str]:
             target = _APP_NAME_MAP[key]
             return ("url" if target.startswith("http") else "app"), target or raw
 
-    # If it looks like a URL
+    # If it looks like a URL (has a dot and no spaces, or starts with http/www)
     if raw.startswith(("http://", "https://", "www.")):
+        url = raw if raw.startswith("http") else f"https://{raw}"
+        return "url", url
+    if "." in raw and " " not in raw:
+        # Looks like a domain name without protocol
         url = raw if raw.startswith("http") else f"https://{raw}"
         return "url", url
 
@@ -233,6 +244,18 @@ def open_app_or_url(target: str) -> dict[str, Any]:
     from automation.os_windows import launch_browser, launch_app
 
     kind, resolved = _resolve_app_target(target)
+
+    # "browser" maps to empty string — open default browser
+    if kind == "app" and (not resolved or resolved == "browser"):
+        success = launch_browser("")
+        return {
+            "action": "open_browser",
+            "target": resolved or "default browser",
+            "success": success,
+            "message": "Opened default browser." if success
+                       else "Failed to open browser.",
+        }
+
     if kind == "url":
         success = launch_browser(resolved)
         return {

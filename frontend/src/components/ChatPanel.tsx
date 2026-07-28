@@ -198,9 +198,7 @@ function ActionCardView({ action }: { action: ActionCard }) {
 export default function ChatPanel({
   projectId,
   onActivity = () => {},
-  onOpenProject = () => {},
   cmdPaletteOpen = false,
-  onCloseCmdPalette = () => {},
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");

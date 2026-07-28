@@ -9,6 +9,7 @@ Ref: ARCHITECTURE.md section 3.1, section 3.2, TECH_STACK.md frontend transport.
 import json
 import logging
 import os
+from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -111,42 +112,31 @@ async def register_project(body: dict) -> dict:
 
 
 @app.post("/projects/{project_id}/brief/generate", tags=["memory"])
-async def generate_morning_brief(project_id: str) -> dict:
-    """Generate and persist a morning brief for the project."""
-    from agent_actions import generate_project_summary
+async def generate_latest_brief(project_id: str) -> dict:
+    """Generate and persist the latest project brief from stored memory."""
+    from decision_engine.planner import _build_brief_payload
     from db.client import upsert_daily_brief, get_daily_brief
 
-    result = generate_project_summary(project_id)
-    if result is None or result.get("error"):
-        return {"error": "Failed to generate brief", "brief": None}
-
-    summary = result.get("summary", "")
-    if not summary or summary == "No summary available.":
-        return {"error": "No summary generated", "brief": None}
-
-    # Parse highlights from the summary (bulleted lines)
-    highlights = [
-        line.lstrip("- ").strip()
-        for line in summary.splitlines()
-        if line.strip().startswith("-")
-    ]
+    payload = _build_brief_payload(project_id)
+    if payload is None:
+        return {"success": False, "error": "Could not read project memory", "brief": None}
 
     success = upsert_daily_brief(
         project_id=project_id,
-        brief_date=datetime.now().strftime("%Y-%m-%d"),
-        commits_count=0,
-        highlights=highlights if highlights else [summary],
-        pending_items=[],
+        brief_date=str(payload.get("brief_date", datetime.now().strftime("%Y-%m-%d"))),
+        commits_count=int(payload.get("commits_count", 0)),
+        highlights=list(payload.get("highlights", [])),
+        pending_items=list(payload.get("pending_items", [])),
     )
 
     brief = get_daily_brief(project_id)
-    return {"success": success, "brief": brief}
+    return {"success": success, "brief": brief, "error": None if success else "Failed to store brief"}
 
 
 @app.get("/projects/{project_id}/brief", tags=["memory"])
-async def get_morning_brief(project_id: str) -> dict:
+async def get_latest_brief(project_id: str) -> dict:
     """
-    Return the latest stored morning brief plus recent raw memory context.
+    Return the latest stored project brief plus recent raw memory context.
 
     Full brief generation is still Phase 2 work; this route is useful today
     because it exposes the stored memory that will feed that generation step.

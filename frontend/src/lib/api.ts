@@ -96,6 +96,7 @@ export interface ActivityItem {
   project_id: string;
   kind: string;
   summary: string;
+  detail?: string;
   created_at: string;
 }
 

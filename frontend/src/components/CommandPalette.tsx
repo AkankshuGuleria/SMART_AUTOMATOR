@@ -12,7 +12,7 @@ interface CommandPaletteProps {
 
 const COMMANDS = [
   { id: 'resume', label: 'Resume workspace', projectId: '' },
-  { id: 'brief', label: 'Open morning brief', projectId: '' },
+  { id: 'brief', label: 'Open last brief', projectId: '' },
   { id: 'activity', label: 'Open activity feed', projectId: '' },
   { id: 'projects', label: 'Show all projects', projectId: '' },
   { id: 'tests', label: 'Run tests', projectId: '' },

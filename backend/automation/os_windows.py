@@ -17,6 +17,7 @@ Phase 3: Implement real Windows OS calls.
 """
 
 import logging
+import os
 import subprocess
 
 logger = logging.getLogger(__name__)
@@ -157,8 +158,9 @@ def launch_browser(url: str) -> bool:
     Open a URL in the default browser.
     """
     try:
-        import webbrowser
-        webbrowser.open(url)
+        if not url:
+            url = "https://www.google.com"
+        os.startfile(url)  # type: ignore[attr-defined]
         logger.info("os_windows.launch_browser: opened | url=%s", url)
         return True
     except Exception as exc:
@@ -202,32 +204,36 @@ def launch_app(app_name: str) -> bool:
     """
     exe = _EXECUTABLE_MAP.get(app_name.lower().strip(), app_name.strip())
     # Handle special protocol URLs (ms-settings: etc.)
-    if exe.startswith("ms-"):
+    if exe.startswith(("ms-", "http://", "https://")):
         try:
-            import webbrowser
-            webbrowser.open(exe)
+            os.startfile(exe)  # type: ignore[attr-defined]
             logger.info("os_windows.launch_app: protocol launch | target=%s", exe)
             return True
         except Exception as exc:
             logger.error("os_windows.launch_app: protocol launch failed | target=%s error=%s", exe, exc)
             return False
     try:
-        subprocess.Popen(
-            [exe],
+        completed = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                f'Start-Process -FilePath "{exe}"',
+            ],
             shell=False,
-            creationflags=subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0,
+            capture_output=True,
+            text=True,
+            timeout=8,
         )
+        if completed.returncode != 0:
+            stderr = (completed.stderr or completed.stdout or "").strip()
+            logger.warning(
+                "os_windows.launch_app: Start-Process failed | app=%s exe=%s error=%s",
+                app_name, exe, stderr,
+            )
+            return False
         logger.info("os_windows.launch_app: launched | app=%s exe=%s", app_name, exe)
         return True
-    except FileNotFoundError:
-        # Try with shell=True as a fallback (handles PATH-dependent programs)
-        try:
-            subprocess.Popen(exe, shell=True)  # noqa: S602
-            logger.info("os_windows.launch_app: shell fallback launched | app=%s", app_name)
-            return True
-        except Exception as exc2:
-            logger.warning("os_windows.launch_app: shell fallback failed | app=%s error=%s", app_name, exc2)
-            return False
     except Exception as exc:
         logger.error("os_windows.launch_app: failed | app=%s exe=%s error=%s", app_name, exe, exc)
         return False

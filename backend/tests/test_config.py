@@ -45,7 +45,7 @@ def _reload_config(monkeypatch, env_overrides: dict) -> object:
     modules_to_clear = [
         k
         for k in sys.modules
-        if k.startswith("config") or k.startswith("backend.config")
+        if k.startswith("config") or k.startswith("backend.config") or k.startswith("ai") or k.startswith("backend.ai")
     ]
     for mod in modules_to_clear:
         del sys.modules[mod]

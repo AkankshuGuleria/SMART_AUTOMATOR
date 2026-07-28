@@ -59,7 +59,7 @@ class IntentParser:
         (
             IntentType.OPEN_BROWSER,
             re.compile(
-                r"\b(?:open|go to|navigate to|launch|visit)\s+"
+                r"\b(?:open|run|go to|navigate to|launch|visit)\s+"
                 r"(?:browser|chrome|firefox|edge|safari|web|"
                 r"chatgpt|gpt|openai|claude|github|google|youtube|"
                 r"https?://\S+|www\.\S+)",
@@ -69,7 +69,7 @@ class IntentParser:
         (
             IntentType.OPEN_APP,
             re.compile(
-                r"\b(?:open|launch|start)\s+"
+                r"\b(?:open|run|launch|start)\s+"
                 r"(?:app\s+)?(?:vscode|vs\s*code|notepad|calculator|"
                 r"explorer|file\s*explorer|terminal|cmd|powershell|"
                 r"slack|discord|spotify|figma|postman|git\s*bash|"
@@ -80,7 +80,7 @@ class IntentParser:
         (
             IntentType.OPEN_APP,
             re.compile(
-                r"\b(?:open|launch|start)\s+(.+?)(?:\s+app(?:lication)?)?$",
+                r"\b(?:open|run|launch|start)\s+(.+?)(?:\s+app(?:lication)?)?$",
                 re.IGNORECASE,
             ),
         ),

@@ -578,12 +578,7 @@ def invoke_reasoning(
         logger.warning("invoke_reasoning: No cloud LLM backend available")
         return None
 
-    # auto mode: try Ollama first (free, local), then cloud providers, then Bedrock
-    if _get_ollama_available():
-        result = _try_provider("ollama", _invoke_ollama_chat)
-        if result:
-            return result
-
+    # auto mode: try cloud providers first, then Bedrock, then Ollama as local fallback.
     groq_key = getattr(settings, "groq_api_key", "")
     gemini_key = getattr(settings, "gemini_api_key", "")
     nvidia_key = getattr(settings, "nvidia_api_key", "")
@@ -606,6 +601,11 @@ def invoke_reasoning(
 
     if settings.bedrock_available:
         result = _try_provider("bedrock", _invoke_bedrock_chat)
+        if result:
+            return result
+
+    if _get_ollama_available():
+        result = _try_provider("ollama", _invoke_ollama_chat)
         if result:
             return result
 

@@ -96,9 +96,11 @@ def plan(trigger: str, context: dict[str, Any]) -> dict[str, Any]:
 
         try:
             result = _execute_action(action)
-            if result is not None:
+            if result is not None and result.get("success", True) is not False:
                 action["executed"] = True
                 action["executed_at"] = datetime.now().isoformat()
+                action["result"] = result
+            elif result is not None:
                 action["result"] = result
         except Exception as exc:
             logger.warning("plan: action failed | type=%s error=%s", action["type"], exc)
@@ -521,6 +523,12 @@ def _build_reply(trigger: str, actions: list[dict[str, Any]], context: dict[str,
     """Build a meaningful human-readable reply from action results."""
     executed = [a for a in actions if a.get("executed") and a.get("result")]
     suggested = [a for a in actions if not a.get("executed") and a.get("policy") == "suggest"]
+    failed = [
+        a for a in actions
+        if not a.get("executed")
+        and a.get("policy") == "auto_execute"
+        and (a.get("result") or {}).get("success") is False
+    ]
 
     if not actions:
         return (
@@ -553,7 +561,8 @@ def _build_reply(trigger: str, actions: list[dict[str, Any]], context: dict[str,
 
         elif atype == "chat_open_browser":
             msg = result.get("message", "")
-            lines.append(f"[browser] {msg}")
+            prefix = "[browser]" if result.get("action") == "open_browser" else "[app]"
+            lines.append(f"{prefix} {msg}")
 
         elif atype == "chat_open_app":
             msg = result.get("message", "")
@@ -596,6 +605,11 @@ def _build_reply(trigger: str, actions: list[dict[str, Any]], context: dict[str,
             flagged = result.get("flagged", 0)
             if flagged:
                 lines.append(f"{flagged} related TODO(s) flagged.")
+
+    for action in failed:
+        result = action.get("result") or {}
+        msg = result.get("message") or "Action failed."
+        lines.append(f"[failed] {msg}")
 
     for action in suggested:
         atype = action.get("type", "")

@@ -54,7 +54,7 @@ export default function MorningBriefWrapper({ projectId }: MorningBriefWrapperPr
 
   if (loading) return <div className="automata-loading" role="status"><span className="automata-spinner" aria-hidden="true" /><p>Loading brief…</p></div>;
   if (error) return <div className="automata-error" role="alert"><p>{error}</p><button className="automata-btn-primary" onClick={fetchBrief}>Retry</button></div>;
-  if (!brief) return <div className="automata-empty"><p>No brief available yet.</p><button className="automata-btn-primary" onClick={handleGenerate} disabled={generating}>{generating ? "Generating…" : "Generate Brief"}</button></div>;
+  if (!brief) return <div className="automata-empty"><p>No brief available yet.</p><button className="automata-btn-primary" onClick={handleGenerate} disabled={generating}>{generating ? "Generating..." : "Generate Last Brief"}</button></div>;
 
   const ready = brief.highlights.length > 0 || brief.pending_items.length > 0 || brief.commits_count > 0;
 
@@ -64,7 +64,7 @@ export default function MorningBriefWrapper({ projectId }: MorningBriefWrapperPr
         <span>{brief.commits_count} commits</span>
         {brief.last_edited_file && <span>Last edited: <code>{brief.last_edited_file}</code></span>}
       </div>
-      {!ready && <p className="automata-empty" style={{ padding: '1.5rem' }}>No highlights or pending items yet. <button className="automata-btn-primary" onClick={handleGenerate} disabled={generating}>{generating ? "Generating…" : "Generate Brief"}</button></p>}
+      {!ready && <p className="automata-empty" style={{ padding: '1.5rem' }}>No highlights or pending items yet. <button className="automata-btn-primary" onClick={handleGenerate} disabled={generating}>{generating ? "Generating..." : "Generate Last Brief"}</button></p>}
       {brief.highlights.length > 0 && (
         <div>
           <h2>Highlights</h2>

@@ -55,8 +55,9 @@ def test_invoke_reasoning_falls_back_from_groq_to_gemini(monkeypatch):
     monkeypatch.setattr(bedrock_client, "_invoke_openrouter_chat", lambda *args, **kwargs: None)
     monkeypatch.setattr(bedrock_client, "_invoke_cohere_chat", lambda *args, **kwargs: None)
     monkeypatch.setattr(bedrock_client, "_invoke_bedrock_chat", lambda *args, **kwargs: None)
+    import sys
     monkeypatch.setattr(
-        config,
+        sys.modules["config"],
         "settings",
         types.SimpleNamespace(
             bedrock_available=False,
@@ -119,8 +120,9 @@ def test_invoke_reasoning_tries_cloud_providers_before_bedrock_and_ollama(monkey
     monkeypatch.setattr(bedrock_client, "_invoke_cohere_chat", fake_cohere_chat)
     monkeypatch.setattr(bedrock_client, "_invoke_bedrock_chat", fake_bedrock_chat)
     monkeypatch.setattr(bedrock_client, "_invoke_ollama_chat", fake_ollama_chat)
+    import sys
     monkeypatch.setattr(
-        config,
+        sys.modules["config"],
         "settings",
         types.SimpleNamespace(
             bedrock_available=True,
@@ -156,8 +158,9 @@ def test_invoke_reasoning_local_mode_uses_only_ollama(monkeypatch):
     monkeypatch.setattr(bedrock_client, "_invoke_openrouter_chat", lambda *args, **kwargs: None)
     monkeypatch.setattr(bedrock_client, "_invoke_cohere_chat", lambda *args, **kwargs: None)
     monkeypatch.setattr(bedrock_client, "_invoke_bedrock_chat", lambda *args, **kwargs: None)
+    import sys
     monkeypatch.setattr(
-        config,
+        sys.modules["config"],
         "settings",
         types.SimpleNamespace(
             bedrock_available=True,
@@ -193,8 +196,9 @@ def test_invoke_reasoning_cloud_mode_skips_ollama(monkeypatch):
     monkeypatch.setattr(bedrock_client, "_invoke_cohere_chat", lambda *args, **kwargs: None)
     monkeypatch.setattr(bedrock_client, "_invoke_bedrock_chat", lambda *args, **kwargs: None)
     monkeypatch.setattr(bedrock_client, "_invoke_ollama_chat", lambda *args, **kwargs: None)
+    import sys
     monkeypatch.setattr(
-        config,
+        sys.modules["config"],
         "settings",
         types.SimpleNamespace(
             bedrock_available=True,

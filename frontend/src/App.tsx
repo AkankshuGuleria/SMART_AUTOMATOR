@@ -8,7 +8,12 @@
  */
 
 import { useState, useEffect } from 'react'
-import { getHealth, setReasoningMode, type HealthStatus } from './lib/api'
+import {
+  getHealth,
+  getReasoningMode,
+  setReasoningMode as saveReasoningMode,
+  type HealthStatus,
+} from './lib/api'
 import ProjectList from './components/ProjectList'
 import ChatPanel from './components/ChatPanel'
 import ActivityFeed from './components/ActivityFeed'
@@ -23,7 +28,7 @@ const NAV_ITEMS: [Screen, string, string][] = [
   ['chat',     '💬', 'Chat'],
   ['projects', '📁', 'Projects'],
   ['activity', '⚡', 'Activity'],
-  ['brief',    '🌅', 'Brief'],
+  ['brief',    '🌅', 'Last Brief'],
 ]
 
 export default function App() {
@@ -39,7 +44,7 @@ export default function App() {
   const handleModeChange = async (newMode: string) => {
     setModeLoading(true)
     try {
-      await setReasoningMode(newMode)
+      await saveReasoningMode(newMode)
       setReasoningMode(newMode)
     } catch {
       // ignore
@@ -64,7 +69,7 @@ export default function App() {
   // Load current reasoning mode
   useEffect(() => {
     getReasoningMode()
-      .then((s) => setReasoningMode(s.reasoning_mode))
+      .then((s: { reasoning_mode: string }) => setReasoningMode(s.reasoning_mode))
       .catch(() => {})
   }, [])
 
@@ -297,7 +302,7 @@ export default function App() {
 
           {screen === 'brief' && (
             <section aria-labelledby="brief-heading" style={{ padding: '1.25rem' }}>
-              <h1 id="brief-heading" style={{ marginBottom: '1rem' }}>Morning Brief</h1>
+              <h1 id="brief-heading" style={{ marginBottom: '1rem' }}>Last Brief</h1>
               <MorningBriefWrapper projectId={activeProjectId || DEMO_PROJECT_ID} />
             </section>
           )}
