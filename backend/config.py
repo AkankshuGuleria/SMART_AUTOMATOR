@@ -38,6 +38,7 @@ class Settings:
     gemini_api_key: str = field(default="")
     minimax_api_key: str = field(default="")
     openrouter_api_key: str = field(default="")
+    openrouter_model: str = field(default="poolside/laguna-s-2.1:free")
     cohere_api_key: str = field(default="")
     api_key: str = field(default="")
 
@@ -82,6 +83,7 @@ def _load_settings() -> Settings:
         gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
         minimax_api_key=os.getenv("MINIMAX_API_KEY", ""),
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
+        openrouter_model=os.getenv("OPENROUTER_MODEL", "poolside/laguna-s-2.1:free"),
         cohere_api_key=os.getenv("COHERE_API_KEY", ""),
         api_key=os.getenv("API_KEY", ""),
         ollama_embedding_model=os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text"),

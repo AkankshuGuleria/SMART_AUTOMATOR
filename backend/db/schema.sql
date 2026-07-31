@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS terminal_commands (
     command     TEXT        NOT NULL,           -- redacted before storage
     cwd         TEXT        NOT NULL,
     exit_code   INT,                            -- nullable if capture missed it
+    command_embedding VECTOR(768),              -- embedding of redacted command (nomic-embed-text)
     run_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -181,4 +182,36 @@ CREATE TABLE IF NOT EXISTS mistake_log (
     root_cause_embedding    VECTOR(768),
     module                  TEXT,           -- e.g. 'memory_manager', 'automation_layer'
     occurred_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ─── workflow_runs ──────────────────────────────────────────────────
+-- Workflow execution instances. See FEATURES_PHASE.md, WORKFLOW_ENGINE.md.
+CREATE TABLE IF NOT EXISTS workflow_runs (
+    id              TEXT        PRIMARY KEY,
+    workflow_id     TEXT        NOT NULL,
+    workflow_version INTEGER    NOT NULL,
+    status          TEXT        NOT NULL,
+    inputs_json     TEXT        NOT NULL,
+    started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at    TIMESTAMPTZ,
+    initiated_by    TEXT        NOT NULL,
+    project_id      TEXT        NOT NULL
+);
+
+-- ─── workflow_steps ─────────────────────────────────────────────────
+-- Individual steps within a workflow run.
+CREATE TABLE IF NOT EXISTS workflow_steps (
+    id                  TEXT        PRIMARY KEY,
+    run_id              TEXT        NOT NULL REFERENCES workflow_runs(id),
+    step_def_id         TEXT        NOT NULL,
+    tool                TEXT        NOT NULL,
+    policy              TEXT        NOT NULL,
+    status              TEXT        NOT NULL,
+    rendered_inputs_json TEXT,
+    output_json         TEXT,
+    redactions_json     TEXT,
+    started_at          TIMESTAMPTZ,
+    completed_at        TIMESTAMPTZ,
+    approved_by         TEXT,
+    approved_at         TIMESTAMPTZ
 );

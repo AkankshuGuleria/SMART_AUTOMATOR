@@ -34,6 +34,21 @@ class IntentType(str, Enum):
     SYSTEM_COMMAND = "system_command"
     QUERY_MEMORY = "query_memory"
     GENERAL_CHAT = "general_chat"
+    # Cross-app control intents
+    COPY_TO_CLIPBOARD = "copy_to_clipboard"
+    PASTE_CLIPBOARD = "paste_clipboard"
+    FOCUS_APP = "focus_app"
+    SEND_KEYSTROKE = "send_keystroke"
+    SUBMIT_PROMPT = "submit_prompt"
+    VERIFY_RESULT = "verify_result"
+    # Visual feedback intents
+    CAPTURE_SCREEN = "capture_screen"
+    OCR_IMAGE = "ocr_image"
+    READ_VISIBLE_CONTEXT = "read_visible_context"
+    DIAGNOSE_VISIBLE_ERROR = "diagnose_visible_error"
+    REVIEW_VISIBLE_DESIGN = "review_visible_design"
+    GENERATE_PROMPT_FROM_SCREEN = "generate_prompt_from_screen"
+    VERIFY_VISIBLE_RESULT = "verify_visible_result"
     UNKNOWN = "unknown"
 
 
@@ -216,6 +231,113 @@ class IntentParser:
             re.compile(
                 r"\b(?:what|when|where|how|who|find|show|tell me|list|"
                 r"search for|look up)\b",
+                re.IGNORECASE,
+            ),
+        ),
+        # ── Cross-app control intents ──────────────────────────────────────────
+        (
+            IntentType.COPY_TO_CLIPBOARD,
+            re.compile(
+                r"\b(?:copy|clipboard|copy to clipboard|copy this|"
+                r"copy the prompt|copy the text|copy the content)\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            IntentType.PASTE_CLIPBOARD,
+            re.compile(
+                r"\b(?:paste|paste clipboard|paste it|paste there|"
+                r"paste it there|paste the prompt)\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            IntentType.FOCUS_APP,
+            re.compile(
+                r"\b(?:focus|bring to front|activate|switch to)\s+"
+                r"(.+)",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            IntentType.SEND_KEYSTROKE,
+            re.compile(
+                r"\b(?:press|type|send|keystroke|keyboard)\s+"
+                r"(.+)",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            IntentType.SUBMIT_PROMPT,
+            re.compile(
+                r"\b(?:submit|send|deliver|hand off|handoff|"
+                r"send the prompt|submit the prompt|send it)\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            IntentType.VERIFY_RESULT,
+            re.compile(
+                r"\b(?:verify|check|confirm|did it work|is it done|"
+                r"did the|did they|check if)\b",
+                re.IGNORECASE,
+            ),
+        ),
+        # ── Visual feedback intents ────────────────────────────────────────────
+        (
+            IntentType.CAPTURE_SCREEN,
+            re.compile(
+                r"\b(?:screenshot|screen capture|capture screen|"
+                r"take a screenshot|screen shot|capture this|"
+                r"what do i see|what is on screen)\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            IntentType.OCR_IMAGE,
+            re.compile(
+                r"\b(?:read text|extract text|ocr|read what'\s?s on|"
+                r"what does it say|read the text)\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            IntentType.READ_VISIBLE_CONTEXT,
+            re.compile(
+                r"\b(?:read the screen|what do i see|look at|check the|"
+                r"review the|look at the|preview the)\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            IntentType.DIAGNOSE_VISIBLE_ERROR,
+            re.compile(
+                r"\b(?:diagnose|debug|fix this error|what went wrong|"
+                r"why is this|error on screen|fix the error)\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            IntentType.REVIEW_VISIBLE_DESIGN,
+            re.compile(
+                r"\b(?:review.*design|design.*review|look at the.*design|"
+                r"improve.*design|design.*improve|ui.*review|preview.*review)\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            IntentType.GENERATE_PROMPT_FROM_SCREEN,
+            re.compile(
+                r"\b(?:prompt from|write a prompt|draft a prompt|"
+                r"create a prompt.*screen|prompt.*based on.*screen)\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            IntentType.VERIFY_VISIBLE_RESULT,
+            re.compile(
+                r"\b(?:verify.*visible|check.*visible|confirm.*result|"
+                r"did the.*appear|is the.*there|check if.*visible)\b",
                 re.IGNORECASE,
             ),
         ),

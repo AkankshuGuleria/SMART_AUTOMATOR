@@ -225,14 +225,26 @@ def _invoke_openrouter_chat(api_key: str, system_prompt: str, user_message: str)
     import urllib.error
     import urllib.request
 
+    import os
+
+    primary_model = os.getenv("OPENROUTER_MODEL", "poolside/laguna-s-2.1:free")
     candidate_models = [
+        primary_model,
         "openai/gpt-4o-mini",
         "anthropic/claude-3.5-sonnet",
         "google/gemini-2.0-flash",
         "meta-llama/llama-3.3-70b-instruct",
         "mistralai/mistral-small-3.1-24b-instruct",
     ]
-    for model_name in candidate_models:
+    # Remove duplicate entries while maintaining priority order
+    seen = set()
+    deduped_models = []
+    for model in candidate_models:
+        if model not in seen:
+            seen.add(model)
+            deduped_models.append(model)
+
+    for model_name in deduped_models:
         payload = json.dumps({
             "model": model_name,
             "messages": [
@@ -313,6 +325,51 @@ def _invoke_cohere_chat(api_key: str, system_prompt: str, user_message: str) -> 
             continue
 
     logger.warning("Cohere chat call failed for all configured model candidates")
+    return None
+
+
+def _invoke_cohere_embedding(api_key: str, text: str) -> list[float] | None:
+    """Call Cohere API for embedding generation."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    candidate_models = ["embed-english-v3.0", "embed-multilingual-v3.0", "embed-english-light-v3.0"]
+    for model_name in candidate_models:
+        payload = json.dumps({
+            "texts": [text],
+            "model": model_name,
+            "input_type": "search_document",
+        }).encode("utf-8")
+
+        try:
+            req = urllib.request.Request(
+                "https://api.cohere.com/v1/embed",
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+                if resp.status == 200:
+                    body = json.loads(resp.read().decode("utf-8"))
+                    embeddings = body.get("embeddings", [])
+                    if isinstance(embeddings, dict):
+                        float_embs = embeddings.get("float", [])
+                        if float_embs:
+                            return float_embs[0]
+                    elif isinstance(embeddings, list) and embeddings:
+                        return embeddings[0]
+        except urllib.error.HTTPError as exc:
+            logger.debug("Cohere embedding attempt failed for %s — %s", model_name, exc)
+            continue
+        except Exception as exc:
+            logger.warning("Cohere embedding call failed — %s", exc)
+            continue
+
+    logger.warning("Cohere embedding call failed for all configured model candidates")
     return None
 
 
@@ -558,8 +615,8 @@ def invoke_reasoning(
         cohere_key = getattr(settings, "cohere_api_key", "")
 
         for provider_name, api_key, func in [
-            ("Groq", groq_key, _invoke_groq_chat),
             ("OpenRouter", openrouter_key, _invoke_openrouter_chat),
+            ("Groq", groq_key, _invoke_groq_chat),
             ("Gemini", gemini_key, _invoke_gemini_chat),
             ("Cohere", cohere_key, _invoke_cohere_chat),
             ("NVIDIA", nvidia_key, _invoke_nvidia_chat),
@@ -587,8 +644,8 @@ def invoke_reasoning(
     cohere_key = getattr(settings, "cohere_api_key", "")
 
     for provider_name, api_key, func in [
-        ("Groq", groq_key, _invoke_groq_chat),
         ("OpenRouter", openrouter_key, _invoke_openrouter_chat),
+        ("Groq", groq_key, _invoke_groq_chat),
         ("Gemini", gemini_key, _invoke_gemini_chat),
         ("Cohere", cohere_key, _invoke_cohere_chat),
         ("NVIDIA", nvidia_key, _invoke_nvidia_chat),
@@ -633,6 +690,15 @@ def invoke_embedding(text: str) -> list[float] | None:
 
     # Cloud mode: try cloud embeddings only
     if mode == "cloud":
+        cohere_key = getattr(settings, "cohere_api_key", "")
+        if cohere_key:
+            logger.info("Embedding: trying Cohere")
+            result = _invoke_cohere_embedding(cohere_key, text)
+            if result:
+                logger.info("Embedding: Cohere succeeded")
+                return result
+            logger.warning("Embedding: Cohere failed")
+
         groq_emb_key = getattr(settings, "groq_embedding_api_key", "")
         groq_key = getattr(settings, "groq_api_key", "")
         if groq_emb_key:
@@ -673,6 +739,15 @@ def invoke_embedding(text: str) -> list[float] | None:
         logger.warning("Embedding: Ollama failed")
 
     # Try cloud embeddings
+    cohere_key = getattr(settings, "cohere_api_key", "")
+    if cohere_key:
+        logger.info("Embedding: trying Cohere")
+        result = _invoke_cohere_embedding(cohere_key, text)
+        if result:
+            logger.info("Embedding: Cohere succeeded")
+            return result
+        logger.warning("Embedding: Cohere failed")
+
     groq_emb_key = getattr(settings, "groq_embedding_api_key", "")
     groq_key = getattr(settings, "groq_api_key", "")
     if groq_emb_key:
@@ -698,9 +773,25 @@ def invoke_embedding(text: str) -> list[float] | None:
             logger.info("Embedding fallback: Gemini succeeded")
             return result
         logger.warning("Embedding fallback: Gemini failed")
+        result = _invoke_cohere_embedding(cohere_key, text)
+        if result:
+            logger.info("Embedding fallback: Cohere succeeded")
+            return result
+        logger.warning("Embedding fallback: Cohere failed")
 
     logger.warning("invoke_embedding: No embedding backend available")
     return None
+
+
+def _load_prompt_template(name: str) -> str:
+    """Load a prompt template from backend/ai/prompts/<name>.txt."""
+    try:
+        from pathlib import Path
+        template_path = Path(__file__).parent / "prompts" / f"{name}.txt"
+        return template_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        logger.warning("_load_prompt_template: failed to load %s — %s", name, exc)
+        return ""
 
 
 def _build_grounded_prompt(
@@ -716,9 +807,12 @@ def _build_grounded_prompt(
         f"- [{m.get('table', 'unknown')}] {m.get('content', str(m))}"
         for m in retrieved_memories[:10]
     )
-    return (
-        f"Use the following retrieved memories as context. "
-        f"Answer based only on these memories — do not fabricate facts not present.\n\n"
-        f"Memories:\n{memory_context}\n\n"
-        f"Question: {user_message}"
-    )
+    template = _load_prompt_template("grounded_answer")
+    if not template:
+        template = (
+            "Use the following retrieved memories as context. "
+            "Answer based only on these memories — do not fabricate facts not present.\n\n"
+            "Memories:\n{memory_context}\n\n"
+            "Question: {user_message}"
+        )
+    return template.format(memory_context=memory_context, user_message=user_message)

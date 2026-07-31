@@ -66,6 +66,7 @@ One row per work session (a continuous period of activity on a project).
 | command | TEXT | |
 | cwd | TEXT | |
 | exit_code | INT | nullable |
+| command_embedding | VECTOR(768) | embedding of redacted command |
 | run_at | TIMESTAMPTZ | |
 
 ### `todos`
@@ -153,6 +154,38 @@ Recurring-mistake prevention. See `SKILLS.md` §10.
 | root_cause_embedding | VECTOR | so future similar symptoms can be matched semantically |
 | module | TEXT | e.g. `memory_manager`, `automation_layer` |
 | occurred_at | TIMESTAMPTZ | |
+
+### `workflow_runs`
+Workflow execution instances. See `FEATURES_PHASE.md` (Workflow Engine).
+| column | type | notes |
+|---|---|---|
+| id | TEXT PK | |
+| workflow_id | TEXT NOT NULL | |
+| workflow_version | INT NOT NULL | |
+| status | TEXT NOT NULL | `created`, `running`, `completed`, `failed`, `awaiting_approval`, `paused`, `cancelled` |
+| inputs_json | TEXT NOT NULL | |
+| started_at | TIMESTAMP NOT NULL | |
+| completed_at | TIMESTAMP | |
+| initiated_by | TEXT NOT NULL | `user` or `trigger:<trigger_id>` |
+| project_id | TEXT NOT NULL | |
+
+### `workflow_steps`
+Individual steps within a workflow run. See `FEATURES_PHASE.md` (Workflow Engine).
+| column | type | notes |
+|---|---|---|
+| id | TEXT PK | |
+| run_id | TEXT NOT NULL | FK → workflow_runs(id) |
+| step_def_id | TEXT NOT NULL | matches the `id` in the workflow definition's steps[] |
+| tool | TEXT NOT NULL | references a tool in `decision_engine/tools.py` |
+| policy | TEXT NOT NULL | resolved policy at execution time |
+| status | TEXT NOT NULL | `pending`, `running`, `succeeded`, `failed`, `waiting_for_approval`, `approved`, `rejected` |
+| rendered_inputs_json | TEXT | |
+| output_json | TEXT | |
+| redactions_json | TEXT | what was stripped before this step ran, if anything |
+| started_at | TIMESTAMP | |
+| completed_at | TIMESTAMP | |
+| approved_by | TEXT | |
+| approved_at | TIMESTAMP | |
 
 ## 3. Vector search
 

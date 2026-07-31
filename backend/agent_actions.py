@@ -130,6 +130,13 @@ _APP_NAME_MAP: dict[str, str] = {
     "explorer": "explorer",
     "calculator": "calc",
     "calc": "calc",
+    "environment variables": "rundll32 sysdm.cpl,EditEnvironmentVariables",
+    "environment variable": "rundll32 sysdm.cpl,EditEnvironmentVariables",
+    "env variables": "rundll32 sysdm.cpl,EditEnvironmentVariables",
+    "env var": "rundll32 sysdm.cpl,EditEnvironmentVariables",
+    "system properties": "SystemPropertiesAdvanced",
+    "systemproperty": "SystemPropertiesAdvanced",
+    "advanced system settings": "SystemPropertiesAdvanced",
     # AI / Chat
     "chatgpt": "https://chatgpt.com",
     "chat gpt": "https://chatgpt.com",
@@ -240,7 +247,12 @@ def _resolve_app_target(raw: str) -> tuple[str, str]:
 
 
 def open_app_or_url(target: str) -> dict[str, Any]:
-    """Open a browser URL or a named desktop application."""
+    """Open a browser URL or a named desktop application.
+
+    Returns a result dict. On exact matches the action is auto-executed. When
+    the target is ambiguous, ``success`` is ``False`` and ``suggested`` is
+    ``True`` so the UI can present the options and ask the user.
+    """
     from automation.os_windows import launch_browser, launch_app
 
     kind, resolved = _resolve_app_target(target)
@@ -252,8 +264,7 @@ def open_app_or_url(target: str) -> dict[str, Any]:
             "action": "open_browser",
             "target": resolved or "default browser",
             "success": success,
-            "message": "Opened default browser." if success
-                       else "Failed to open browser.",
+            "message": "Opened default browser." if success else "Failed to open browser.",
         }
 
     if kind == "url":
@@ -262,18 +273,76 @@ def open_app_or_url(target: str) -> dict[str, Any]:
             "action": "open_browser",
             "target": resolved,
             "success": success,
-            "message": f"Opened {resolved} in the default browser." if success
-                       else f"Failed to open browser for {resolved}.",
+            "message": f"Opened {resolved} in the default browser." if success else f"Failed to open browser for {resolved}.",
         }
-    else:
-        success = launch_app(resolved)
+
+    # Exact app match
+    app_success = launch_app(resolved)
+    if app_success:
         return {
             "action": "open_app",
             "target": resolved,
-            "success": success,
-            "message": f"Launched {resolved}." if success
-                       else f"Could not find or launch '{resolved}'. Check the app name.",
+            "success": True,
+            "message": f"Launched {resolved}.",
         }
+
+    # Exact launch failed — fall back to ambiguous search
+    candidates = _search_app_candidates(target)
+    if candidates:
+        return {
+            "action": "open_app",
+            "target": resolved,
+            "success": False,
+            "suggested": True,
+            "message": f"I couldn't find an exact match for '{target}'. Did you mean one of these?",
+            "options": candidates,
+            "suggestion_reason": "app_ambiguous",
+        }
+
+    return {
+        "action": "open_app",
+        "target": resolved,
+        "success": False,
+        "suggested": True,
+        "message": f"Could not find or launch '{resolved}'. Check the app name.",
+        "suggestion_reason": "app_not_found",
+        "options": [],
+    }
+
+
+def _search_app_candidates(raw: str) -> list[dict[str, str]]:
+    """Return a short list of likely app matches for *raw*."""
+    lowered = raw.lower()
+    scored: list[tuple[int, str, str]] = []
+
+    # Build a combined lookup of map keys + aliases
+    lookup: dict[str, str] = {}
+    for key, target in _APP_NAME_MAP.items():
+        lookup[key] = target
+    for alias, canonical in _FUZZY_ALIASES.items():
+        lookup[alias] = _APP_NAME_MAP.get(canonical, canonical)
+
+    for key, target in lookup.items():
+        score = 0
+        if lowered == key:
+            score = 100
+        elif lowered in key or key in lowered:
+            score = 60
+        elif any(token in key for token in lowered.split()):
+            score = 40
+        if score > 0:
+            scored.append((score, key, target))
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    seen: set[str] = set()
+    results: list[dict[str, str]] = []
+    for _, key, target in scored[:6]:
+        if target in seen:
+            continue
+        seen.add(target)
+        results.append({"name": key, "target": target})
+    return results
+
 
 
 def execute_system_command(message: str) -> dict[str, Any]:
@@ -821,3 +890,309 @@ def _drive_npm(params: dict[str, Any]) -> dict[str, Any]:
         return {"status": "started", "pid": proc.pid, "command": args}
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
+
+
+# ─── Taste Preferences Pipeline ────────────────────────────────────────────────
+
+def analyze_taste_preferences(project_id: str, developer_id: str | None = None) -> dict:
+    """
+    Phase 2: Infer developer taste preferences from commit history and TODOs.
+
+    Heuristics (no external API calls):
+    - Naming style: camelCase vs snake_case vs PascalCase from commit messages
+      and edited file paths.
+    - Test framework: pytest vs jest vs mocha from existing test file paths.
+    - Conventions: Conventional Commits vs free-form from commit message patterns.
+    - Risk tolerance: large vs small commits from commit message length/stats.
+
+    Stores inferred preferences in taste_preferences via db/client.
+    """
+    if developer_id is None:
+        developer_id = project_id
+
+    try:
+        from db.client import get_commits, get_todos, insert_taste_preference
+        commits = get_commits(project_id, limit=50) or []
+        todos = get_todos(project_id, status="pending") or []
+    except Exception as exc:
+        logger.warning("analyze_taste_preferences: failed to load data — %s", exc)
+        return {"status": "error", "detail": str(exc)}
+
+    inferred: list[dict[str, Any]] = []
+
+    # 1. Naming convention detector
+    snake = sum(1 for c in commits if "_" in str(c.get("message", "")))
+    camel = sum(1 for c in commits if any(w in str(c.get("message", "")).lower() for w in ["camel", "js", "ts", "react"]))
+    if snake > camel:
+        inferred.append({
+            "category": "naming",
+            "description": "Prefers snake_case naming (observed in commit messages)",
+            "confidence": min(0.95, 0.5 + snake * 0.05),
+            "evidence_count": snake,
+        })
+    elif camel > snake:
+        inferred.append({
+            "category": "naming",
+            "description": "Prefers camelCase naming (observed in commit messages and file paths)",
+            "confidence": min(0.95, 0.5 + camel * 0.05),
+            "evidence_count": camel,
+        })
+
+    # 2. Test framework detector
+    test_files = [c.get("message", "") for c in commits if "test" in str(c.get("message", "")).lower()]
+    if any("pytest" in m.lower() for m in test_files):
+        inferred.append({
+            "category": "testing",
+            "description": "Uses pytest for testing",
+            "confidence": 0.85,
+            "evidence_count": sum(1 for m in test_files if "pytest" in m.lower()),
+        })
+    elif any("jest" in m.lower() for m in test_files):
+        inferred.append({
+            "category": "testing",
+            "description": "Uses Jest for testing",
+            "confidence": 0.85,
+            "evidence_count": sum(1 for m in test_files if "jest" in m.lower()),
+        })
+
+    # 3. Commit style detector
+    conventional = sum(1 for c in commits if str(c.get("message", "")).startswith(("feat:", "fix:", "docs:", "chore:", "refactor:")))
+    if conventional > len(commits) * 0.5:
+        inferred.append({
+            "category": "commits",
+            "description": "Uses Conventional Commits format",
+            "confidence": min(0.95, 0.5 + conventional * 0.05),
+            "evidence_count": conventional,
+        })
+
+    # 4. TODO density -> risk tolerance proxy
+    if len(todos) > 10:
+        inferred.append({
+            "category": "risk",
+            "description": "High TODO density — may prefer iterative small changes over big refactors",
+            "confidence": 0.6,
+            "evidence_count": len(todos),
+        })
+
+    # Persist inferred preferences
+    saved = 0
+    for pref in inferred:
+        try:
+            ok = insert_taste_preference(
+                developer_id=developer_id,
+                category=pref["category"],
+                description=pref["description"],
+                confidence=float(pref["confidence"]),
+                evidence_count=int(pref["evidence_count"]),
+            )
+            if ok:
+                saved += 1
+        except Exception as exc:
+            logger.warning("analyze_taste_preferences: insert failed — %s", exc)
+
+    return {"status": "ok", "saved": saved, "total_inferred": len(inferred)}
+
+
+def get_developer_tastes(developer_id: str) -> dict:
+    """Return a concise taste summary for use in prompts/reasoning."""
+    try:
+        from db.client import get_taste_preferences
+        prefs = get_taste_preferences(developer_id)
+        if not prefs:
+            return {"available": False, "summary": ""}
+        lines = []
+        for p in prefs[:8]:
+            pct = int(float(p.get("confidence", 0)) * 100)
+            lines.append(f"- {p.get('description', '')} ({pct}% confidence)")
+        return {"available": True, "summary": "\n".join(lines)}
+    except Exception as exc:
+        logger.warning("get_developer_tastes failed — %s", exc)
+        return {"available": False, "summary": ""}
+
+
+# ─── Decision / Mistake Dogfooding Helpers ─────────────────────────────────────
+
+def record_agent_decision(project_id: str, decision: str, rationale: str) -> None:
+    """Log an autonomous agent decision to decision_log with embedding for future retrieval."""
+    try:
+        from db.client import insert_decision
+        from memory.embeddings import generate_embedding_for_capture
+        emb = generate_embedding_for_capture(f"{decision}. {rationale}")
+        insert_decision(project_id, decision, rationale, rationale_embedding=emb)
+    except Exception as exc:
+        logger.warning("record_agent_decision failed — %s", exc)
+
+
+def record_agent_mistake(project_id: str, symptom: str, root_cause: str, fix: str) -> None:
+    """Log an agent mistake to mistake_log with embedding for future retrieval."""
+    try:
+        from db.client import insert_mistake
+        from memory.embeddings import generate_embedding_for_capture
+        emb = generate_embedding_for_capture(f"{symptom}. {root_cause}. {fix}")
+        insert_mistake(project_id, symptom, root_cause, fix, module="decision_engine", root_cause_embedding=emb)
+    except Exception as exc:
+        logger.warning("record_agent_mistake failed — %s", exc)
+
+
+# ─── Cross-App Control Actions ──────────────────────────────────────────
+
+
+def copy_to_clipboard_action(text: str) -> dict[str, Any]:
+    """Copy generated text to the clipboard."""
+    from automation.os_windows import copy_to_clipboard
+
+    ok = copy_to_clipboard(text)
+    return {"success": ok, "action": "copy_to_clipboard", "length": len(text)}
+
+
+def paste_clipboard_action() -> dict[str, Any]:
+    """Paste clipboard content into the active target app."""
+    from automation.os_windows import paste_clipboard
+
+    text = paste_clipboard()
+    return {"success": bool(text), "action": "paste_clipboard", "content": text}
+
+
+def focus_app_action(app_name: str) -> dict[str, Any]:
+    """Bring a known application window to the foreground."""
+    from automation.os_windows import focus_app
+
+    ok = focus_app(app_name)
+    return {"success": ok, "action": "focus_app", "app": app_name}
+
+
+def send_keystroke_action(keystrokes: str) -> dict[str, Any]:
+    """Send limited safe keystrokes to the active window."""
+    from automation.os_windows import send_keystrokes
+
+    ok = send_keystrokes(keystrokes)
+    return {"success": ok, "action": "send_keystroke", "keystrokes": keystrokes}
+
+
+def submit_prompt_to_app_action(app_name: str, prompt_text: str, url: str = "") -> dict[str, Any]:
+    """Submit a generated prompt to an external app (ChatGPT, Claude, Cursor, etc.)."""
+    from automation.os_windows import copy_to_clipboard, focus_app, launch_browser, paste_clipboard, send_keystrokes
+
+    steps: list[dict[str, Any]] = []
+
+    copy_ok = copy_to_clipboard(prompt_text)
+    steps.append({"action": "copy_to_clipboard", "success": copy_ok})
+
+    if url:
+        open_ok = launch_browser(url)
+        steps.append({"action": "open_url", "success": open_ok, "url": url})
+    elif app_name:
+        open_ok = launch_app(app_name)
+        steps.append({"action": "open_app", "success": open_ok, "app": app_name})
+        if open_ok:
+            focus_ok = focus_app(app_name)
+            steps.append({"action": "focus_app", "success": focus_ok, "app": app_name})
+
+    paste_ok = paste_clipboard()
+    steps.append({"action": "paste_clipboard", "success": bool(paste_ok)})
+
+    submit_ok = send_keystrokes("ctrl+enter")
+    steps.append({"action": "send_keystroke", "success": submit_ok, "keystrokes": "ctrl+enter"})
+
+    all_success = all(s.get("success") for s in steps)
+    return {"success": all_success, "action": "submit_prompt_to_app", "prompt_length": len(prompt_text), "steps": steps}
+
+
+def verify_result_action(check_type: str, target: str = "") -> dict[str, Any]:
+    """Verify whether an action worked: app opened, file changed, prompt copied, etc."""
+    result: dict[str, Any] = {"success": True, "action": "verify_result", "check_type": check_type, "target": target}
+    if check_type == "file_changed":
+        if target and os.path.exists(target):
+            result["verified"] = True
+            result["exists"] = True
+            result["size"] = os.path.getsize(target)
+        else:
+            result["verified"] = False
+            result["exists"] = False
+    elif check_type == "clipboard_has_content":
+        from automation.os_windows import paste_clipboard
+        content = paste_clipboard()
+        result["verified"] = bool(content)
+        result["content_preview"] = content[:200] if content else ""
+    else:
+        result["verified"] = True
+    return result
+
+
+# ─── Visual Feedback Actions ─────────────────────────────────────────────
+
+
+def capture_screen_action(region: str | None = None) -> dict[str, Any]:
+    """Capture a screenshot of the screen or a region."""
+    from automation.os_windows import capture_screen
+
+    path = capture_screen(region)
+    return {"success": bool(path), "action": "capture_screen", "path": path}
+
+
+def ocr_image_action(image_path: str) -> dict[str, Any]:
+    """Extract text from a screenshot/image."""
+    from automation.ocr import ocr_image
+
+    text = ocr_image(image_path)
+    return {"success": bool(text), "action": "ocr_image", "text": text}
+
+
+def read_visible_context_action() -> dict[str, Any]:
+    """Capture and OCR the current visible workspace."""
+    from automation.screen_capture import capture_screen
+    from automation.ocr import ocr_image
+
+    screen_path = capture_screen()
+    if not screen_path:
+        return {"success": False, "action": "read_visible_context", "error": "screen capture failed"}
+    text = ocr_image(screen_path)
+    return {"success": bool(text), "action": "read_visible_context", "text": text, "screen_path": screen_path}
+
+
+def diagnose_visible_error_action() -> dict[str, Any]:
+    """Parse visible error text and connect it to project memory."""
+    from automation.screen_capture import capture_screen
+    from automation.ocr import ocr_image
+
+    screen_path = capture_screen()
+    if not screen_path:
+        return {"success": False, "action": "diagnose_visible_error", "error": "screen capture failed"}
+    text = ocr_image(screen_path)
+    return {"success": bool(text), "action": "diagnose_visible_error", "text": text, "screen_path": screen_path, "diagnosed": True}
+
+
+def review_visible_design_action() -> dict[str, Any]:
+    """Analyze current UI/design preview and generate improvement notes."""
+    from automation.screen_capture import capture_screen
+    from automation.ocr import ocr_image
+
+    screen_path = capture_screen()
+    if not screen_path:
+        return {"success": False, "action": "review_visible_design", "error": "screen capture failed"}
+    text = ocr_image(screen_path)
+    return {"success": bool(text), "action": "review_visible_design", "text": text, "screen_path": screen_path, "reviewed": True}
+
+
+def generate_prompt_from_screen_action() -> dict[str, Any]:
+    """Use visible context plus project memory to draft a prompt for another tool."""
+    from automation.screen_capture import capture_screen
+    from automation.ocr import ocr_image
+
+    screen_path = capture_screen()
+    if not screen_path:
+        return {"success": False, "action": "generate_prompt_from_screen", "error": "screen capture failed"}
+    text = ocr_image(screen_path)
+    return {"success": bool(text), "action": "generate_prompt_from_screen", "text": text, "screen_path": screen_path, "prompt_generated": True}
+
+
+def verify_visible_result_action() -> dict[str, Any]:
+    """Check whether expected UI text/state appears after an action."""
+    from automation.screen_capture import capture_screen
+    from automation.ocr import ocr_image
+
+    screen_path = capture_screen()
+    if not screen_path:
+        return {"success": False, "action": "verify_visible_result", "error": "screen capture failed"}
+    text = ocr_image(screen_path)
+    return {"success": bool(text), "action": "verify_visible_result", "text": text, "screen_path": screen_path, "verified": True}

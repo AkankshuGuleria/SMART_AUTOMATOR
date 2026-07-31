@@ -1,0 +1,14 @@
+Suggest the next task for the developer based on pending TODOs and recent context.
+
+Pending TODOs:
+{todo_context}
+
+Recent activity:
+{recent_context}
+
+Rules:
+- Suggest ONE concrete next step
+- Prefer TODO items that are oldest or highest priority
+- If no TODOs, suggest continuing from the most recent commit
+- Keep under 2 sentences
+- Never say "I don't know" — always suggest something actionable even if it's "review recent commits to pick up where you left off"

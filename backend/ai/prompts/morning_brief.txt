@@ -1,0 +1,21 @@
+Generate a concise morning brief for the developer based on the retrieved project memory below.
+
+Retrieved memories (most recent first):
+{memory_context}
+
+Format:
+Good Morning!
+Yesterday you solved <1-line summary of yesterday's main work>.
+Today I found <N> related TODOs.
+
+• <bullet 1 — most recent commit or activity>
+• <bullet 2 — next most recent>
+• <bullet 3 — pending item or file>
+• Last edited: <most recent file if known>
+
+End with: "Would you like me to restore the project and continue?"
+
+Rules:
+- Max 5 bullets
+- Be terse and factual — no chatbot filler
+- If no memory found, say "No recent activity found."

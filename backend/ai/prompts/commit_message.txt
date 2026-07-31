@@ -1,0 +1,11 @@
+Generate a conventional commit message from the provided diff/staged changes.
+
+Diff/staged changes:
+{diff_context}
+
+Rules:
+- Use Conventional Commits format: <type>(<scope>): <description>
+- Types: feat, fix, docs, style, refactor, test, chore
+- Keep under 72 characters
+- Describe what changed and why, not how
+- If no changes detected, return "chore: no staged changes"

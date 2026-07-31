@@ -256,7 +256,35 @@ def retrieve_by_vector(
             logger.error("retrieve_by_vector: failed for table %s — %s", table, exc)
     
     # Re-rank results by score (lower score = more similar)
-    results.sort(key=lambda x: x.get('score', 1.0))
-    
-    # Return top_k results
-    return results[:top_k]
+    results.sort(key=lambda x: x.get("score", 1.0))
+
+    # Minimum score threshold — if nothing is close enough, return empty
+    # so the caller knows retrieval found no good match.
+    min_score = 0.85  # CockroachDB vector distance threshold; lower = more similar
+    filtered = [r for r in results if float(r.get("score", 1.0)) <= min_score]
+    if not filtered and results:
+        logger.debug("retrieve_by_vector: all results above min_score threshold %.2f — returning empty", min_score)
+        return []
+
+    # Diversity filter: avoid flooding one table/day. Cap per table and spread across recent days.
+    per_table_cap = max(1, top_k // max(1, len(tables)))
+    daily_cap = max(1, per_table_cap // 2)
+    diversified: list[dict[str, Any]] = []
+    table_counts: dict[str, int] = {}
+    day_counts: dict[str, int] = {}
+
+    for r in filtered:
+        tbl = r.get("table", "")
+        ts = str(r.get("timestamp", ""))
+        day = ts[:10] if ts else "unknown"
+        if table_counts.get(tbl, 0) >= per_table_cap:
+            continue
+        if day_counts.get(day, 0) >= daily_cap:
+            continue
+        table_counts[tbl] = table_counts.get(tbl, 0) + 1
+        day_counts[day] = day_counts.get(day, 0) + 1
+        diversified.append(r)
+        if len(diversified) >= top_k:
+            break
+
+    return diversified[:top_k]

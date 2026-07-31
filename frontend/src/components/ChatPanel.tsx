@@ -140,9 +140,14 @@ function MessageBubble({ msg }: { msg: Message }) {
       {/* Action cards */}
       {!isUser && msg.actions && msg.actions.length > 0 && (
         <div style={{ maxWidth: "88%", marginTop: "0.5rem", display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-          {msg.actions.map((a: ActionCard, i) => (
-            <ActionCardView key={i} action={a} />
-          ))}
+          {msg.actions.map((a: ActionCard, i) => {
+            const actionType = String(a.type || "");
+            // Hide raw JSON for memory/explain actions — the reply text already contains the answer
+            if (actionType === "chat_query_memory" || actionType === "chat_explain_repo") {
+              return null;
+            }
+            return <ActionCardView key={i} action={a} />;
+          })}
         </div>
       )}
     </div>

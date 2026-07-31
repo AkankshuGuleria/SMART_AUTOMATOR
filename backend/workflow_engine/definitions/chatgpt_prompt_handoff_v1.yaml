@@ -1,0 +1,52 @@
+id: chatgpt_prompt_handoff_v1
+name: "ChatGPT Prompt Handoff"
+description: >
+  Retrieves relevant project memory, drafts a prompt grounded in that
+  context, copies it to the clipboard, opens ChatGPT, and pauses
+  before pasting/submission for confirmation.
+version: 1
+inputs:
+  - name: project_id
+    type: string
+    required: true
+  - name: user_request
+    type: string
+    required: true
+steps:
+  - id: retrieve_memory
+    tool: retrieve_memory
+    inputs:
+      project_id: "{{ inputs.project_id }}"
+      query: "{{ inputs.user_request }}"
+      top_k: "8"
+    on_error: skip
+  - id: generate_prompt
+    tool: call_design_tool
+    inputs:
+      target: "chatgpt"
+      prompt: "Based on the project context, draft a prompt for ChatGPT to help design the next automation feature."
+    on_error: abort
+  - id: copy_to_clipboard
+    tool: copy_to_clipboard
+    inputs:
+      text: "{{ steps.generate_prompt.output.result }}"
+    on_error: abort
+  - id: open_chatgpt
+    tool: open_url
+    inputs:
+      url: "https://chatgpt.com"
+    on_error: abort
+  - id: focus_chatgpt
+    tool: focus_app
+    inputs:
+      app_name: "chatgpt"
+    on_error: skip
+  - id: paste_and_submit
+    tool: submit_prompt_to_app
+    inputs:
+      url: "https://chatgpt.com"
+      prompt: "{{ steps.copy_to_clipboard.output.text }}"
+    on_error: abort
+outputs:
+  - name: prompt_length
+    from: steps.copy_to_clipboard.output.length

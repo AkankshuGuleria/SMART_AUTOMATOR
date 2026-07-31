@@ -131,6 +131,13 @@ class FileWatcherThread(threading.Thread):
         """Write a file_edits row via db/client."""
         from db.client import get_session
 
+        embedding = None
+        try:
+            from memory.embeddings import generate_embedding_for_capture
+            embedding = generate_embedding_for_capture(change_summary)
+        except Exception as exc:
+            logger.debug("FileWatcherThread: embedding generation skipped — %s", exc)
+
         with get_session() as session:
             if session is None:
                 logger.debug("FileWatcherThread: DB not available — skipping file edit")
@@ -150,8 +157,10 @@ class FileWatcherThread(threading.Thread):
                         "change_summary": change_summary,
                     },
                 )
+                session.commit()
                 logger.debug("FileWatcherThread: recorded edit | %s", file_path)
             except Exception as exc:
+                session.rollback()
                 logger.error("FileWatcherThread: failed to write file edit — %s", exc)
 
 
@@ -274,6 +283,13 @@ class GitPollerThread(threading.Thread):
         """Write a commits row via db/client."""
         from db.client import get_session
 
+        message_embedding = None
+        try:
+            from memory.embeddings import generate_embedding_for_capture
+            message_embedding = generate_embedding_for_capture(commit.message.strip()[:500])
+        except Exception as exc:
+            logger.debug("GitPollerThread: embedding generation skipped — %s", exc)
+
         with get_session() as session:
             if session is None:
                 logger.debug("GitPollerThread: DB not available — skipping commit")
@@ -283,9 +299,9 @@ class GitPollerThread(threading.Thread):
                 session.execute(
                     text(
                         "INSERT INTO commits "
-                        "(project_id, session_id, commit_hash, message, author, committed_at) "
+                        "(project_id, session_id, commit_hash, message, author, committed_at, message_embedding) "
                         "VALUES (:project_id, :session_id, :commit_hash, "
-                        ":message, :author, :committed_at) "
+                        ":message, :author, :committed_at, :message_embedding) "
                         "ON CONFLICT (project_id, commit_hash) DO NOTHING"
                     ),
                     {
@@ -295,6 +311,7 @@ class GitPollerThread(threading.Thread):
                         "message": commit.message.strip()[:500],
                         "author": commit.author.name or "",
                         "committed_at": commit.committed_datetime,
+                        "message_embedding": message_embedding,
                     },
                 )
                 logger.debug(
@@ -306,6 +323,7 @@ class GitPollerThread(threading.Thread):
                 # Fire the on_commit trigger for the Decision Engine (Phase 4.5)
                 self._fire_on_commit_trigger(commit)
             except Exception as exc:
+                session.rollback()
                 logger.error("GitPollerThread: failed to write commit — %s", exc, exc_info=True)
 
     def _fire_on_commit_trigger(self, commit) -> None:
@@ -406,6 +424,13 @@ class TerminalCaptureThread(threading.Thread):
 
         redacted = redact_secrets(command)
 
+        command_embedding = None
+        try:
+            from memory.embeddings import generate_embedding_for_capture
+            command_embedding = generate_embedding_for_capture(redacted)
+        except Exception as exc:
+            logger.debug("TerminalCaptureThread: embedding generation skipped — %s", exc)
+
         with get_session() as session:
             if session is None:
                 logger.debug("TerminalCaptureThread: DB not available — skipping command")
@@ -415,8 +440,8 @@ class TerminalCaptureThread(threading.Thread):
                 session.execute(
                     text(
                         "INSERT INTO terminal_commands "
-                        "(project_id, session_id, command, cwd, exit_code) "
-                        "VALUES (:project_id, :session_id, :command, :cwd, :exit_code)"
+                        "(project_id, session_id, command, cwd, exit_code, command_embedding) "
+                        "VALUES (:project_id, :session_id, :command, :cwd, :exit_code, :command_embedding)"
                     ),
                     {
                         "project_id": self.project_id,
@@ -424,11 +449,36 @@ class TerminalCaptureThread(threading.Thread):
                         "command": redacted,
                         "cwd": os.getcwd(),
                         "exit_code": None,
+                        "command_embedding": command_embedding,
                     },
                 )
+                session.commit()
                 logger.debug("TerminalCaptureThread: recorded command | %s...", redacted[:60])
-            except Exception as exc:
-                logger.error("TerminalCaptureThread: failed to write command — %s", exc)
+            except Exception:
+                session.rollback()
+                # Fallback: insert without command_embedding column
+                # (handles older DB schemas that don't have the column yet)
+                try:
+                    from sqlalchemy import text
+                    session.execute(
+                        text(
+                            "INSERT INTO terminal_commands "
+                            "(project_id, session_id, command, cwd, exit_code) "
+                            "VALUES (:project_id, :session_id, :command, :cwd, :exit_code)"
+                        ),
+                        {
+                            "project_id": self.project_id,
+                            "session_id": self.session_id,
+                            "command": redacted,
+                            "cwd": os.getcwd(),
+                            "exit_code": None,
+                        },
+                    )
+                    session.commit()
+                    logger.debug("TerminalCaptureThread: recorded command (no embedding) | %s...", redacted[:60])
+                except Exception as exc:
+                    session.rollback()
+                    logger.error("TerminalCaptureThread: failed to write command — %s", exc)
 
 
 def redact_secrets(text: str) -> str:

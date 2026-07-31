@@ -2,11 +2,11 @@
 memory/embeddings.py — AUTOMATA Persistent Memory Engine: embedding generation.
 
 Owns:    Generating vector embeddings for semantically rich content
-          (commit messages, TODOs, architecture notes, session summaries,
-          README text) before writing them to CockroachDB vector columns.
+         (commit messages, TODOs, architecture notes, session summaries,
+         README text) before writing them to CockroachDB vector columns.
 Never:   Must not write to CockroachDB directly (→ db/client.py).
-          Must not call Bedrock for reasoning (→ ai/bedrock_client.py).
-          Embedding is a data-preparation step, not a reasoning step.
+         Must not call Bedrock for reasoning (→ ai/bedrock_client.py).
+         Embedding is a data-preparation step, not a reasoning step.
 Ref:     ARCHITECTURE.md §3.2a (Memory Lifecycle), DATABASE_SCHEMA.md §3.
 
 Phase 0: Uses Ollama (free, local) for embedding generation.
@@ -58,3 +58,20 @@ def batch_generate_embeddings(texts: list[str]) -> list[list[float] | None]:
     otherwise call generate_embedding() per item with controlled concurrency.
     """
     return [generate_embedding(t) for t in texts]
+
+
+def format_vector(values: list[float] | None) -> str | None:
+    """Return a CockroachDB-compatible vector literal, or None if input is None/empty."""
+    if not values:
+        return None
+    return "[" + ",".join(str(float(value)) for value in values) + "]"
+
+
+def generate_embedding_for_capture(text: str, max_length: int = 500) -> str | None:
+    """Convenience wrapper for capture paths: generate embedding from truncated text."""
+    if not text:
+        return None
+    truncated = text[:max_length]
+    vector = generate_embedding(truncated)
+    return format_vector(vector)
+

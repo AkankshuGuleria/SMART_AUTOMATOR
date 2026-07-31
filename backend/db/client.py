@@ -18,8 +18,10 @@ Usage:
 """
 
 import logging
+import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.dialects.postgresql.base import PGDialect
@@ -219,7 +221,7 @@ def insert_session(project_id: str) -> str | None:
             return None
 
 
-def end_session(project_id: str, session_id: str, summary: str | None = None) -> bool:
+def end_session(project_id: str, session_id: str, summary: str | None = None, summary_embedding: str | None = None) -> bool:
     """End a session by setting ended_at and optionally a summary.
 
     After a successful update, fires the Decision Engine on_session_end trigger
@@ -236,10 +238,10 @@ def end_session(project_id: str, session_id: str, summary: str | None = None) ->
         try:
             session.execute(
                 text(
-                    "UPDATE sessions SET ended_at = now(), summary = :summary "
+                    "UPDATE sessions SET ended_at = now(), summary = :summary, summary_embedding = :summary_embedding "
                     "WHERE id = :session_id AND ended_at IS NULL"
                 ),
-                {"project_id": project_id, "session_id": session_id, "summary": summary},
+                {"project_id": project_id, "session_id": session_id, "summary": summary, "summary_embedding": summary_embedding},
             )
         except Exception as exc:
             logger.error("db/client: end_session failed — %s", exc)
@@ -289,6 +291,7 @@ def insert_commit(
     message: str,
     author: str,
     committed_at: str,
+    message_embedding: str | None = None,
 ) -> bool:
     """Insert a commit. Returns True on success, False on duplicate or failure."""
     from sqlalchemy import text
@@ -302,9 +305,9 @@ def insert_commit(
             session.execute(
                 text(
                     "INSERT INTO commits "
-                    "(project_id, session_id, commit_hash, message, author, committed_at) "
+                    "(project_id, session_id, commit_hash, message, author, committed_at, message_embedding) "
                     "VALUES (:project_id, :session_id, :commit_hash, "
-                    ":message, :author, :committed_at)"
+                    ":message, :author, :committed_at, :message_embedding)"
                 ),
                 {
                     "project_id": project_id,
@@ -313,6 +316,7 @@ def insert_commit(
                     "message": message[:500],
                     "author": author,
                     "committed_at": committed_at,
+                    "message_embedding": message_embedding,
                 },
             )
             return True
@@ -374,8 +378,10 @@ def insert_file_edit(
                     "change_summary": change_summary,
                 },
             )
+            session.commit()
             return True
         except Exception as exc:
+            session.rollback()
             logger.error("db/client: insert_file_edit failed — %s", exc)
             return False
 
@@ -412,6 +418,7 @@ def insert_terminal_command(
     command: str,
     cwd: str,
     exit_code: int | None = None,
+    command_embedding: str | None = None,
 ) -> bool:
     """Insert a terminal command record."""
     from sqlalchemy import text
@@ -425,8 +432,8 @@ def insert_terminal_command(
             session.execute(
                 text(
                     "INSERT INTO terminal_commands "
-                    "(project_id, session_id, command, cwd, exit_code) "
-                    "VALUES (:project_id, :session_id, :command, :cwd, :exit_code)"
+                    "(project_id, session_id, command, cwd, exit_code, command_embedding) "
+                    "VALUES (:project_id, :session_id, :command, :cwd, :exit_code, :command_embedding)"
                 ),
                 {
                     "project_id": project_id,
@@ -434,6 +441,7 @@ def insert_terminal_command(
                     "command": command,
                     "cwd": cwd,
                     "exit_code": exit_code,
+                    "command_embedding": command_embedding,
                 },
             )
             return True
@@ -473,6 +481,7 @@ def insert_todo(
     description: str,
     source: str = "manual",
     status: str = "pending",
+    description_embedding: str | None = None,
 ) -> str | None:
     """Insert a TODO. Returns the TODO UUID or None on failure."""
     from sqlalchemy import text
@@ -485,8 +494,8 @@ def insert_todo(
         try:
             result = session.execute(
                 text(
-                    "INSERT INTO todos (project_id, description, source, status) "
-                    "VALUES (:project_id, :description, :source, :status) "
+                    "INSERT INTO todos (project_id, description, source, status, description_embedding) "
+                    "VALUES (:project_id, :description, :source, :status, :description_embedding) "
                     "RETURNING id"
                 ),
                 {
@@ -494,6 +503,7 @@ def insert_todo(
                     "description": description,
                     "source": source,
                     "status": status,
+                    "description_embedding": description_embedding,
                 },
             )
             row = result.fetchone()
@@ -591,6 +601,7 @@ def insert_architecture_note(
     project_id: str,
     title: str,
     content: str,
+    content_embedding: str | None = None,
 ) -> str | None:
     """Insert an architecture note. Returns the note UUID or None on failure."""
     from sqlalchemy import text
@@ -603,11 +614,11 @@ def insert_architecture_note(
         try:
             result = session.execute(
                 text(
-                    "INSERT INTO architecture_notes (project_id, title, content) "
-                    "VALUES (:project_id, :title, :content) "
+                    "INSERT INTO architecture_notes (project_id, title, content, content_embedding) "
+                    "VALUES (:project_id, :title, :content, :content_embedding) "
                     "RETURNING id"
                 ),
-                {"project_id": project_id, "title": title, "content": content},
+                {"project_id": project_id, "title": title, "content": content, "content_embedding": content_embedding},
             )
             row = result.fetchone()
             return str(row[0]) if row else None
@@ -862,6 +873,7 @@ def insert_decision(
     project_id: str | None,
     decision: str,
     rationale: str,
+    rationale_embedding: str | None = None,
 ) -> str | None:
     """Insert a decision log entry. Returns the decision UUID or None on failure."""
     from sqlalchemy import text
@@ -874,11 +886,11 @@ def insert_decision(
         try:
             result = session.execute(
                 text(
-                    "INSERT INTO decision_log (project_id, decision, rationale) "
-                    "VALUES (:project_id, :decision, :rationale) "
+                    "INSERT INTO decision_log (project_id, decision, rationale, rationale_embedding) "
+                    "VALUES (:project_id, :decision, :rationale, :rationale_embedding) "
                     "RETURNING id"
                 ),
-                {"project_id": project_id, "decision": decision, "rationale": rationale},
+                {"project_id": project_id, "decision": decision, "rationale": rationale, "rationale_embedding": rationale_embedding},
             )
             row = result.fetchone()
             return str(row[0]) if row else None
@@ -928,6 +940,7 @@ def insert_mistake(
     root_cause: str,
     fix: str,
     module: str | None = None,
+    root_cause_embedding: str | None = None,
 ) -> str | None:
     """Insert a mistake log entry. Returns the mistake UUID or None on failure."""
     from sqlalchemy import text
@@ -941,8 +954,8 @@ def insert_mistake(
             result = session.execute(
                 text(
                     "INSERT INTO mistake_log "
-                    "(project_id, symptom, root_cause, fix, module) "
-                    "VALUES (:project_id, :symptom, :root_cause, :fix, :module) "
+                    "(project_id, symptom, root_cause, fix, module, root_cause_embedding) "
+                    "VALUES (:project_id, :symptom, :root_cause, :fix, :module, :root_cause_embedding) "
                     "RETURNING id"
                 ),
                 {
@@ -951,6 +964,7 @@ def insert_mistake(
                     "root_cause": root_cause,
                     "fix": fix,
                     "module": module,
+                    "root_cause_embedding": root_cause_embedding,
                 },
             )
             row = result.fetchone()
@@ -981,4 +995,240 @@ def get_mistakes(project_id: str) -> list[dict]:
             return [dict(row._mapping) for row in result.fetchall()]
         except Exception as exc:
             logger.error("db/client: get_mistakes failed — %s", exc)
+            return []
+
+
+# ─── Workflow engine CRUD ──────────────────────────
+
+
+def insert_workflow_run(
+    workflow_id: str,
+    workflow_version: int,
+    inputs_json: str,
+    project_id: str,
+    initiated_by: str = "user",
+) -> str | None:
+    """Insert a new workflow run and return its ID."""
+    from sqlalchemy import text
+
+    run_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+
+    with get_session() as session:
+        if session is None:
+            return None
+        try:
+            session.execute(
+                text(
+                    "INSERT INTO workflow_runs "
+                    "(id, workflow_id, workflow_version, status, inputs_json, "
+                    "started_at, initiated_by, project_id) "
+                    "VALUES "
+                    "(:id, :workflow_id, :workflow_version, 'running', :inputs_json, "
+                    ":started_at, :initiated_by, :project_id)"
+                ),
+                {
+                    "id": run_id,
+                    "workflow_id": workflow_id,
+                    "workflow_version": workflow_version,
+                    "inputs_json": inputs_json,
+                    "started_at": now,
+                    "initiated_by": initiated_by,
+                    "project_id": project_id,
+                },
+            )
+            session.commit()
+            return run_id
+        except Exception as exc:
+            logger.error("db/client: insert_workflow_run failed — %s", exc)
+            return None
+
+
+def update_workflow_run_status(
+    run_id: str, status: str, completed_at: str | None = None
+) -> bool:
+    """Update the status of a workflow run."""
+    from sqlalchemy import text
+
+    with get_session() as session:
+        if session is None:
+            return False
+        try:
+            session.execute(
+                text(
+                    "UPDATE workflow_runs SET status = :status, "
+                    "completed_at = :completed_at WHERE id = :id"
+                ),
+                {
+                    "status": status,
+                    "completed_at": completed_at,
+                    "id": run_id,
+                },
+            )
+            session.commit()
+            return True
+        except Exception as exc:
+            logger.error("db/client: update_workflow_run_status failed — %s", exc)
+            return False
+
+
+def insert_workflow_step(
+    run_id: str,
+    step_def_id: str,
+    tool: str,
+    policy: str,
+    rendered_inputs_json: str | None = None,
+    output_json: str | None = None,
+    redactions_json: str | None = None,
+) -> str | None:
+    """Insert a new workflow step and return its ID."""
+    from sqlalchemy import text
+
+    step_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+
+    with get_session() as session:
+        if session is None:
+            return None
+        try:
+            session.execute(
+                text(
+                    "INSERT INTO workflow_steps "
+                    "(id, run_id, step_def_id, tool, policy, status, "
+                    "rendered_inputs_json, output_json, redactions_json, started_at) "
+                    "VALUES "
+                    "(:id, :run_id, :step_def_id, :tool, :policy, 'running', "
+                    ":rendered_inputs_json, :output_json, :redactions_json, :started_at)"
+                ),
+                {
+                    "id": step_id,
+                    "run_id": run_id,
+                    "step_def_id": step_def_id,
+                    "tool": tool,
+                    "policy": policy,
+                    "rendered_inputs_json": rendered_inputs_json,
+                    "output_json": output_json,
+                    "redactions_json": redactions_json,
+                    "started_at": now,
+                },
+            )
+            session.commit()
+            return step_id
+        except Exception as exc:
+            logger.error("db/client: insert_workflow_step failed — %s", exc)
+            return None
+
+
+def update_workflow_step(
+    step_id: str,
+    status: str,
+    output_json: str | None = None,
+    completed_at: str | None = None,
+    approved_by: str | None = None,
+    approved_at: str | None = None,
+) -> bool:
+    """Update a workflow step's status and output."""
+    from sqlalchemy import text
+
+    with get_session() as session:
+        if session is None:
+            return False
+        try:
+            session.execute(
+                text(
+                    "UPDATE workflow_steps SET status = :status, "
+                    "output_json = :output_json, completed_at = :completed_at, "
+                    "approved_by = :approved_by, approved_at = :approved_at "
+                    "WHERE id = :id"
+                ),
+                {
+                    "status": status,
+                    "output_json": output_json,
+                    "completed_at": completed_at,
+                    "approved_by": approved_by,
+                    "approved_at": approved_at,
+                    "id": step_id,
+                },
+            )
+            session.commit()
+            return True
+        except Exception as exc:
+            logger.error("db/client: update_workflow_step failed — %s", exc)
+            return False
+
+
+def get_workflow_run(run_id: str) -> dict | None:
+    """Return a single workflow run by ID."""
+    from sqlalchemy import text
+
+    with get_session() as session:
+        if session is None:
+            return None
+        try:
+            result = session.execute(
+                text(
+                    "SELECT id, workflow_id, workflow_version, status, inputs_json, "
+                    "started_at, completed_at, initiated_by, project_id "
+                    "FROM workflow_runs WHERE id = :id"
+                ),
+                {"id": run_id},
+            )
+            row = result.fetchone()
+            return dict(row._mapping) if row else None
+        except Exception as exc:
+            logger.error("db/client: get_workflow_run failed — %s", exc)
+            return None
+
+
+def get_workflow_runs(
+    project_id: str, status: str | None = None
+) -> list[dict]:
+    """Return workflow runs for a project."""
+    from sqlalchemy import text
+
+    with get_session() as session:
+        if session is None:
+            return []
+        try:
+            query = (
+                "SELECT id, workflow_id, workflow_version, status, inputs_json, "
+                "started_at, completed_at, initiated_by, project_id "
+                "FROM workflow_runs WHERE project_id = :project_id"
+            )
+            params: dict[str, Any] = {"project_id": project_id}
+
+            if status:
+                query += " AND status = :status"
+                params["status"] = status
+
+            query += " ORDER BY started_at DESC"
+
+            result = session.execute(text(query), params)
+            return [dict(row._mapping) for row in result.fetchall()]
+        except Exception as exc:
+            logger.error("db/client: get_workflow_runs failed — %s", exc)
+            return []
+
+
+def get_workflow_steps(run_id: str) -> list[dict]:
+    """Return workflow steps for a run."""
+    from sqlalchemy import text
+
+    with get_session() as session:
+        if session is None:
+            return []
+        try:
+            result = session.execute(
+                text(
+                    "SELECT id, run_id, step_def_id, tool, policy, status, "
+                    "rendered_inputs_json, output_json, redactions_json, "
+                    "started_at, completed_at, approved_by, approved_at "
+                    "FROM workflow_steps WHERE run_id = :run_id "
+                    "ORDER BY started_at"
+                ),
+                {"run_id": run_id},
+            )
+            return [dict(row._mapping) for row in result.fetchall()]
+        except Exception as exc:
+            logger.error("db/client: get_workflow_steps failed — %s", exc)
             return []

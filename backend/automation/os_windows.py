@@ -18,7 +18,10 @@ Phase 3: Implement real Windows OS calls.
 
 import logging
 import os
+import re
 import subprocess
+import tempfile
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +215,35 @@ def launch_app(app_name: str) -> bool:
         except Exception as exc:
             logger.error("os_windows.launch_app: protocol launch failed | target=%s error=%s", exe, exc)
             return False
+
+    _run_timeout = 8
+
+    # If the mapped value looks like a composite shell command
+    # (e.g. "rundll32 sysdm.cpl,EditEnvironmentVariables"), execute it
+    # directly via PowerShell -Command. Wrapping it in Start-Process
+    # -FilePath makes PowerShell look for one non-existent executable.
+    if re.search(r"\s|,|&|\|", exe):
+        try:
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", exe],
+                shell=False,
+                capture_output=True,
+                text=True,
+                timeout=_run_timeout,
+            )
+            if completed.returncode != 0:
+                stderr = (completed.stderr or completed.stdout or "").strip()
+                logger.warning(
+                    "os_windows.launch_app: shell command failed | app=%s exe=%s error=%s",
+                    app_name, exe, stderr,
+                )
+                return False
+            logger.info("os_windows.launch_app: launched | app=%s exe=%s", app_name, exe)
+            return True
+        except Exception as exc:
+            logger.error("os_windows.launch_app: failed | app=%s exe=%s error=%s", app_name, exe, exc)
+            return False
+
     try:
         completed = subprocess.run(
             [
@@ -223,7 +255,7 @@ def launch_app(app_name: str) -> bool:
             shell=False,
             capture_output=True,
             text=True,
-            timeout=8,
+            timeout=_run_timeout,
         )
         if completed.returncode != 0:
             stderr = (completed.stderr or completed.stdout or "").strip()
@@ -237,3 +269,206 @@ def launch_app(app_name: str) -> bool:
     except Exception as exc:
         logger.error("os_windows.launch_app: failed | app=%s exe=%s error=%s", app_name, exe, exc)
         return False
+
+
+# ─── Cross-app control primitives ──────────────────────────────────────
+
+def copy_to_clipboard(text: str) -> bool:
+    """
+    Copy the given text to the Windows clipboard via PowerShell Set-Clipboard.
+
+    Returns True on success, False on failure.
+    """
+    if not text:
+        logger.warning("os_windows.copy_to_clipboard: empty text provided")
+        return False
+    try:
+        # Escape single quotes and wrap in single quotes for PowerShell
+        escaped = text.replace("'", "''")
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", f"Set-Clipboard -Value '{escaped}'"],
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if completed.returncode != 0:
+            stderr = (completed.stderr or completed.stdout or "").strip()
+            logger.warning("os_windows.copy_to_clipboard: Set-Clipboard failed — %s", stderr)
+            return False
+        logger.info("os_windows.copy_to_clipboard: copied %d chars to clipboard", len(text))
+        return True
+    except Exception as exc:
+        logger.error("os_windows.copy_to_clipboard: failed — %s", exc)
+        return False
+
+
+def paste_clipboard() -> str:
+    """
+    Retrieve the current clipboard content via PowerShell Get-Clipboard.
+
+    Returns the clipboard text on success, or an empty string on failure.
+    """
+    try:
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw"],
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if completed.returncode != 0:
+            stderr = (completed.stderr or completed.stdout or "").strip()
+            logger.warning("os_windows.paste_clipboard: Get-Clipboard failed — %s", stderr)
+            return ""
+        return completed.stdout
+    except Exception as exc:
+        logger.error("os_windows.paste_clipboard: failed — %s", exc)
+        return ""
+
+
+def focus_app(app_name: str) -> bool:
+    """
+    Bring a running application window to the foreground.
+
+    Uses PowerShell to find and activate the window by its process name.
+    Returns True on success, False on failure.
+    """
+    try:
+        # Try to find and activate the window via PowerShell Show-Window + Set-ForegroundWindow
+        script = (
+            f'Add-Type -AssemblyName Microsoft.VisualBasic; '
+            f'$proc = Get-Process -Name "{app_name}" -ErrorAction SilentlyContinue; '
+            f'if ($proc) {{ '
+            f'  [Microsoft.VisualBasic.Interaction]::AppActivate($proc.Id); '
+            f'  Write-Output "activated"; '
+            f'}} else {{ '
+            f'  Write-Output "not_found"; '
+            f'}}'
+        )
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        output = completed.stdout.strip()
+        if output == "activated":
+            logger.info("os_windows.focus_app: focused | app=%s", app_name)
+            return True
+        logger.warning("os_windows.focus_app: process not found | app=%s", app_name)
+        return False
+    except Exception as exc:
+        logger.error("os_windows.focus_app: failed | app=%s error=%s", app_name, exc)
+        return False
+
+
+def send_keystrokes(keystrokes: str) -> bool:
+    """
+    Send keystrokes to the active window via PowerShell SendKeys.
+
+    Supports limited safe keys: Ctrl+V, Enter, Ctrl+L, Alt+Tab, Tab, Escape.
+    Returns True on success, False on failure.
+    """
+    safe_patterns = {"ctrl+v", "enter", "ctrl+l", "alt+tab", "tab", "escape"}
+    normalized = keystrokes.lower().strip()
+    if normalized not in safe_patterns:
+        logger.warning(
+            "os_windows.send_keystrokes: unsafe keystroke rejected | keystrokes=%s",
+            keystrokes,
+        )
+        return False
+    try:
+        # Map safe keystrokes to PowerShell SendKeys notation
+        mapping = {
+            "ctrl+v": "^v",
+            "enter": "~",
+            "ctrl+l": "^l",
+            "alt+tab": "%{tab}",
+            "tab": "{tab}",
+            "escape": "{esc}",
+        }
+        ps_keys = mapping.get(normalized, keystrokes)
+        script = f'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("{ps_keys}")'
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if completed.returncode != 0:
+            stderr = (completed.stderr or completed.stdout or "").strip()
+            logger.warning("os_windows.send_keystrokes: SendKeys failed — %s", stderr)
+            return False
+        logger.info("os_windows.send_keystrokes: sent | keystrokes=%s", keystrokes)
+        return True
+    except Exception as exc:
+        logger.error("os_windows.send_keystrokes: failed | keystrokes=%s error=%s", keystrokes, exc)
+        return False
+
+
+def capture_screen(region: str | None = None) -> str:
+    """
+    Capture a screenshot and save it to a temp file.
+
+    Args:
+        region: Optional region string in format "left,top,width,height".
+                If None, captures the full screen.
+
+    Returns the path to the saved screenshot image, or an empty string on failure.
+    """
+    try:
+        tmp_dir = tempfile.gettempdir()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(tmp_dir, f"automata_screen_{timestamp}.png")
+
+        if region:
+            # Parse "left,top,width,height"
+            parts = [p.strip() for p in region.split(",")]
+            if len(parts) != 4:
+                logger.warning("os_windows.capture_screen: invalid region format | region=%s", region)
+                return ""
+            left, top, width, height = parts
+            script = (
+                f'Add-Type -AssemblyName System.Drawing; '
+                f'$bmp = New-Object System.Drawing.Bitmap([int]$width, [int]$height); '
+                f'$gfx = [System.Drawing.Graphics]::FromImage($bmp); '
+                f'$gfx.CopyFromScreen([int]$left, [int]$top, 0, 0, '
+                f'[System.Drawing.Size]::new([int]$width, [int]$height)); '
+                f'$bmp.Save("{path}", [System.Drawing.Imaging.ImageFormat]::Png); '
+                f'$gfx.Dispose(); $bmp.Dispose(); Write-Output "saved"'
+            )
+        else:
+            script = (
+                f'Add-Type -AssemblyName System.Drawing; '
+                f'[System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") | Out-Null; '
+                f'$bmp = New-Object System.Drawing.Bitmap('
+                f'[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width, '
+                f'[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); '
+                f'$gfx = [System.Drawing.Graphics]::FromImage($bmp); '
+                f'$gfx.CopyFromScreen(0, 0, 0, 0, $bmp.Size); '
+                f'$bmp.Save("{path}", [System.Drawing.Imaging.ImageFormat]::Png); '
+                f'$gfx.Dispose(); $bmp.Dispose(); Write-Output "saved"'
+            )
+
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if completed.returncode != 0 or "saved" not in completed.stdout:
+            stderr = (completed.stderr or completed.stdout or "").strip()
+            logger.warning("os_windows.capture_screen: capture failed — %s", stderr)
+            return ""
+        logger.info("os_windows.capture_screen: captured | path=%s", path)
+        return path
+    except Exception as exc:
+        logger.error("os_windows.capture_screen: failed — %s", exc)
+        return ""
+
+
+# Maps common friendly names to Windows executable names

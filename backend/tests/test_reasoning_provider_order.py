@@ -139,7 +139,7 @@ def test_invoke_reasoning_tries_cloud_providers_before_bedrock_and_ollama(monkey
     result = bedrock_client.invoke_reasoning("system", "user", [])
 
     assert result is None
-    assert calls == ["groq", "openrouter", "gemini", "cohere", "nvidia", "minimax", "bedrock", "ollama"]
+    assert calls == ["openrouter", "groq", "gemini", "cohere", "nvidia", "minimax", "bedrock", "ollama"]
 
 
 def test_invoke_reasoning_local_mode_uses_only_ollama(monkeypatch):

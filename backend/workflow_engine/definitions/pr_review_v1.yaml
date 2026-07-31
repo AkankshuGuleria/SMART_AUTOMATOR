@@ -1,0 +1,38 @@
+id: pr_review_v1
+name: "Review current PR"
+description: >
+  Reads the working diff, checks it against known past mistakes,
+  drafts a summary, and posts it as a PR comment after approval.
+version: 1
+inputs:
+  - name: pr_reference
+    type: string
+    required: true
+steps:
+  - id: read_diff
+    tool: run_command
+    inputs:
+      command: "git diff HEAD~1"
+    on_error: abort
+  - id: check_mistakes
+    tool: retrieve_memory
+    inputs:
+      project_id: "{{ inputs.project_id }}"
+      query: "past mistakes related to PR review"
+      top_k: "5"
+    on_error: skip
+  - id: draft_summary
+    tool: call_design_tool
+    inputs:
+      target: "chatgpt"
+      prompt: "Review this diff and draft a concise PR summary. Consider past mistakes: {{ steps.check_mistakes.output.memories }}"
+    on_error: abort
+  - id: post_comment
+    tool: submit_prompt_to_app
+    inputs:
+      url: "https://github.com"
+      prompt: "{{ steps.draft_summary.output.result }}"
+    on_error: abort
+outputs:
+  - name: comment_url
+    from: steps.post_comment.output.result

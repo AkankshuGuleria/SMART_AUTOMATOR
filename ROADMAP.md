@@ -1,7 +1,7 @@
 # ROADMAP.md — 20-Day Build Plan
 
 ## Current Phase
-> **Update this line as you progress:** `Phase 5 - In Progress | Polish & Submission.`
+> **Update this line as you progress:** `Phase 2 - In Progress.`
 
 ---
 
@@ -39,16 +39,16 @@
   captured activity from a real coding session?
 
 ## Phase 2 (Days 6–10): Retrieval & reasoning
-- [ ] Embedding generation pipeline wired to all `*_embedding` columns.
+- [x] Embedding generation pipeline wired to all `*_embedding` columns.
 - [x] Vector search query layer (`retrieval.py`).
-- [ ] Bedrock client + grounded-answer prompt (`SKILLS.md` §5).
-- [ ] "What was I working on yesterday?" working end-to-end from a real
+- [x] Bedrock client + grounded-answer prompt (`SKILLS.md` `§5`).
+- [x] "What was I working on yesterday?" working end-to-end from a real
       question to a real grounded answer.
-- [ ] `daily_briefs` generation job/endpoint.
-- [ ] `taste_preferences` inference pipeline: derive naming/style/library
+- [x] `daily_briefs` generation job/endpoint.
+- [x] `taste_preferences` inference pipeline: derive naming/style/library
       signals from the developer's own commit history — see
-      `SKILLS.md` §7.
-- [ ] `decision_log` and `mistake_log` tables wired up and populated as
+      `SKILLS.md` `§7`.
+- [x] `decision_log` and `mistake_log` tables wired up and populated as
       real decisions/bugs happen during the build itself (dogfood the
       product on its own development).
 - **Milestone check:** ask 5 differently-phrased questions about the same
@@ -98,6 +98,19 @@
   relevant TODO — with visible provenance — without being asked.
 
 ## Phase 5 (Day 20): Polish & submission
+- [ ] Feature phase context written for MVP-winning cross-app control
+      actions (`FEATURES_PHASE.md`) before implementation.
+- [ ] Cross-app control actions wired safely: clipboard, open app/URL,
+      focus app, paste, limited keystrokes, prompt submission, result
+      verification.
+- [ ] External prompt handoff policy implemented: copy is safe, paste
+      needs confirmation, submit to external AI requires approval.
+- [ ] Visual Feedback Layer wired for OCR/screen context: design preview
+      review, visible error diagnosis, prompt generation from screen, and
+      visible result verification.
+- [ ] Workflow Engine MVP slice implemented (`WORKFLOW_ENGINE.md`):
+      `chatgpt_prompt_handoff_v1` runs through derived approval gates,
+      checkpointing, verification, and decision-log provenance.
 - [ ] Chat-first UI pass: persistent chat bar, live project cards, inline action cards, command palette (`Cmd/Ctrl+K`), activity feed.
 - [ ] Intent routing wired: NLU chat intents route through `decision_engine/intent_parser.py` → planner → execution.
 - [ ] System command execution wired with provenance and undo hints.

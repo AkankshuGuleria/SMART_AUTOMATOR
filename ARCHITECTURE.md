@@ -180,7 +180,28 @@ loop, so behavior stays consistent and auditable.
 - Falls back gracefully: if a design/code generation tool is unavailable, the conversation continues instead of aborting.
 - All delegated prompts and results are logged to `decision_log` for auditability.
 
-### 3.5 Python Background Agent — the core
+### 3.5 Cross-App Control Layer
+- New tool actions in `decision_engine/tools.py`: `copy_to_clipboard`, `paste_clipboard`, `open_url`, `focus_app`, `send_keystroke`, `submit_prompt_to_app`, `verify_result`.
+- OS primitives in `backend/automation/os_windows.py`: clipboard read/write, window focus, safe keystroke dispatch, screen capture.
+- Three execution policies govern these actions: `auto_execute` (low-risk, e.g., copy to clipboard, open URL), `confirm_once` (medium-risk, e.g., paste into external app, focus window), `require_approval` (high-risk, e.g., submit prompt to external AI).
+- Privacy guardrail: before sending content to an external app or AI service, the system checks for project memory, code snippets, credentials, and private URLs. Secrets are redacted, the action is flagged as an external handoff, and approval is required.
+- All cross-app handoffs are logged to `decision_log` with provenance.
+
+### 3.6 Visual Feedback Layer
+- New modules: `backend/automation/screen_capture.py` (screen capture), `backend/automation/ocr.py` (OCR text extraction with secret redaction).
+- New tool actions: `capture_screen`, `ocr_image`, `read_visible_context`, `diagnose_visible_error`, `review_visible_design`, `generate_prompt_from_screen`, `verify_visible_result`.
+- Enables the agent to use what is visible on screen as context for debugging, design review, prompt writing, and verification.
+- Privacy rules: ask before screen capture, redact secrets before OCR text is stored or passed to a reasoning prompt, do not persist raw screenshots by default, ask before sending OCR-derived context to an external AI.
+
+### 3.7 Workflow Engine
+- Coordinates multi-step developer workflows as named, versioned runs composed from existing `decision_engine/tools.py` tools.
+- Derives approval gates from the existing action policies (`auto_execute`, `confirm_once`, `require_approval`) instead of adding a second safety model.
+- Persists checkpoints after each step so a workflow can pause for approval, resume safely, and avoid re-running completed steps.
+- Never calls OS-level automation directly; every effect goes through the registered tool layer, and every completed step writes provenance to `decision_log`.
+- MVP slice is `chatgpt_prompt_handoff_v1`: retrieve memory, generate prompt, copy to clipboard, open ChatGPT, pause before paste/submission, verify, and log the handoff. See `FEATURES_PHASE.md` and `WORKFLOW_ENGINE.md`.
+- New DB tables: `workflow_runs`, `workflow_steps`.
+
+### 3.6 Python Background Agent — the core
 Three responsibilities, three internal modules:
 
 **a) Persistent Memory Engine** (code: `backend/memory/`)
@@ -205,7 +226,9 @@ Three responsibilities, three internal modules:
 
 **c) Automation Layer** (code: `backend/automation/`)
 - Executes OS-level & cross-app actions: launch/close terminal, checkout git branch, start/stop dev servers, launch/control external applications (editors, web browsers, background tool jobs).
-- Isolated behind an extensible API (`restore_workspace()`, `start_dev_servers()`, `open_editor()`, `execute_cross_app_task()`) so it can be mocked/stubbed for testing without touching the real OS.
+- Cross-app control primitives: clipboard read/write, window focus, safe keystroke dispatch, screen capture.
+- Visual feedback: screen capture and OCR for reading visible workspace context.
+- Isolated behind an extensible API (`restore_workspace()`, `start_dev_servers()`, `open_editor()`, `execute_cross_app_task()`, `copy_to_clipboard()`, `paste_clipboard()`, `focus_app()`, `send_keystroke()`, `capture_screen()`, `ocr_image()`) so it can be mocked/stubbed for testing without touching the real OS.
 - Built against ONE primary OS first (Windows). Cross-platform support is a stretch goal, not a dependency for the core memory story.
 
 ### 3.3 CockroachDB — persistent memory store

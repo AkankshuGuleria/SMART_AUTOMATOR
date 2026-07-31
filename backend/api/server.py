@@ -423,62 +423,24 @@ async def chat(body: dict) -> dict:
     planner_reply = ""
     plan_result: dict = {"actions": [], "reply": ""}
 
-    if parsed.intent == IntentType.UNKNOWN:
-        planner_reply = (
-            "I'm not sure how to help with that. Try:\n"
-            "• \"open browser to chatgpt.com\"\n"
-            "• \"explain repo\"\n"
-            "• \"what was I working on yesterday?\"\n"
-            "• \"run tests\"\n"
-            "• \"resume where I left off\""
-        )
-        return {
-            "intent": "unknown",
-            "confidence": 0.0,
-            "reply": planner_reply,
-            "actions": [],
-            "executed_actions": [],
-            "project_id": parsed.project_id,
-            "error": None,
-        }
+    target_intent = parsed.intent
+    if parsed.intent in (IntentType.UNKNOWN, IntentType.GENERAL_CHAT):
+        target_intent = IntentType.QUERY_MEMORY
 
-    elif parsed.intent == IntentType.GENERAL_CHAT:
-        planner_reply = (
-            "Hi! I'm AUTOMATA — your persistent memory developer agent.\n\n"
-            "I can help you:\n"
-            "• Resume and restore your project workspace\n"
-            "• Answer questions about what you were working on\n"
-            "• Open apps and browsers\n"
-            "• Generate commit messages\n"
-            "• Explain your codebase\n"
-            "• Run tests and suggest next tasks\n\n"
-            "Try: \"open browser to chatgpt.com\" or \"what did I do yesterday?\""
+    try:
+        plan_result = plan(
+            trigger=f"chat:{target_intent.value}",
+            context={
+                "message": message,
+                "parsed": parsed.params or {},
+                "project_id": parsed.project_id or active_project_id or project_id,
+            },
         )
-        return {
-            "intent": "general_chat",
-            "confidence": parsed.confidence,
-            "reply": planner_reply,
-            "actions": [],
-            "executed_actions": [],
-            "project_id": parsed.project_id,
-            "error": None,
-        }
-
-    else:
-        try:
-            plan_result = plan(
-                trigger=f"chat:{parsed.intent.value}",
-                context={
-                    "message": message,
-                    "parsed": parsed.params or {},
-                    "project_id": parsed.project_id,
-                },
-            )
-            planner_reply = plan_result.get("reply") or ""
-        except Exception as exc:
-            logger.exception("chat: planner failed")
-            planner_reply = f"Intent recognised as `{parsed.intent.value}`, but planning failed: {exc}"
-            error = str(exc)
+        planner_reply = plan_result.get("reply") or ""
+    except Exception as exc:
+        logger.exception("chat: planner failed")
+        planner_reply = f"Could not process prompt: {exc}"
+        error = str(exc)
 
     executed_actions = [a for a in plan_result.get("actions", []) if a.get("executed")]
 
@@ -599,6 +561,312 @@ async def activity_feed(limit: int = 50, project_id: Optional[str] = None) -> di
 
     feed.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return {"items": feed[:limit]}
+
+
+# ─── Cross-App Control Routes ──────────────────────────
+
+
+@app.post("/cross-app/copy-to-clipboard", tags=["cross-app"])
+async def copy_to_clipboard_route(body: dict) -> dict:
+    """Copy text to the clipboard."""
+    text = str(body.get("text", ""))
+    if not text:
+        return {"success": False, "error": "text is required"}
+    try:
+        from automation.os_windows import copy_to_clipboard
+        ok = copy_to_clipboard(text)
+        return {"success": ok, "copied": ok, "length": len(text)}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.post("/cross-app/paste-clipboard", tags=["cross-app"])
+async def paste_clipboard_route(body: dict | None = None) -> dict:
+    """Paste clipboard content."""
+    try:
+        from automation.os_windows import paste_clipboard
+        text = paste_clipboard()
+        return {"success": bool(text), "content": text}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.post("/cross-app/open-url", tags=["cross-app"])
+async def open_url_route(body: dict) -> dict:
+    """Open a URL in the default browser."""
+    url = str(body.get("url", "")).strip()
+    if not url:
+        return {"success": False, "error": "url is required"}
+    try:
+        from automation.os_windows import launch_browser
+        ok = launch_browser(url)
+        return {"success": ok, "opened": ok, "url": url}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.post("/cross-app/focus-app", tags=["cross-app"])
+async def focus_app_route(body: dict) -> dict:
+    """Bring a known application window to the foreground."""
+    app_name = str(body.get("app_name", "")).strip()
+    if not app_name:
+        return {"success": False, "error": "app_name is required"}
+    try:
+        from automation.os_windows import focus_app
+        ok = focus_app(app_name)
+        return {"success": ok, "focused": ok, "app": app_name}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.post("/cross-app/send-keystroke", tags=["cross-app"])
+async def send_keystroke_route(body: dict) -> dict:
+    """Send limited safe keystrokes to the active window."""
+    keystrokes = str(body.get("keystrokes", "")).strip()
+    if not keystrokes:
+        return {"success": False, "error": "keystrokes is required"}
+    try:
+        from automation.os_windows import send_keystrokes
+        ok = send_keystrokes(keystrokes)
+        return {"success": ok, "sent": ok, "keystrokes": keystrokes}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.post("/cross-app/submit-prompt", tags=["cross-app"])
+async def submit_prompt_route(body: dict) -> dict:
+    """Submit a generated prompt to an external app (ChatGPT, Claude, Cursor, etc.). Requires approval."""
+    app_name = str(body.get("app_name", "")).strip()
+    url = str(body.get("url", "")).strip()
+    prompt_text = str(body.get("prompt", "")).strip()
+    if not prompt_text:
+        return {"success": False, "error": "prompt is required"}
+    try:
+        from automation.os_windows import copy_to_clipboard, focus_app, launch_browser, launch_app, paste_clipboard, send_keystrokes
+        steps: list[dict] = []
+        copy_ok = copy_to_clipboard(prompt_text)
+        steps.append({"action": "copy_to_clipboard", "success": copy_ok})
+        if url:
+            open_ok = launch_browser(url)
+            steps.append({"action": "open_url", "success": open_ok, "url": url})
+        elif app_name:
+            open_ok = launch_app(app_name)
+            steps.append({"action": "open_app", "success": open_ok, "app": app_name})
+            if open_ok:
+                focus_ok = focus_app(app_name)
+                steps.append({"action": "focus_app", "success": focus_ok, "app": app_name})
+        paste_ok = paste_clipboard()
+        steps.append({"action": "paste_clipboard", "success": bool(paste_ok)})
+        submit_ok = send_keystrokes("ctrl+enter")
+        steps.append({"action": "send_keystroke", "success": submit_ok, "keystrokes": "ctrl+enter"})
+        all_success = all(s.get("success") for s in steps)
+        return {"success": all_success, "prompt_length": len(prompt_text), "steps": steps}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.post("/cross-app/verify-result", tags=["cross-app"])
+async def verify_result_route(body: dict) -> dict:
+    """Verify whether an action worked."""
+    check_type = str(body.get("type", "")).strip()
+    target = str(body.get("target", "")).strip()
+    if not check_type:
+        return {"success": False, "error": "type is required"}
+    try:
+        result: dict = {"success": True, "check_type": check_type, "target": target}
+        if check_type == "file_changed":
+            if target and os.path.exists(target):
+                result["verified"] = True
+                result["exists"] = True
+                result["size"] = os.path.getsize(target)
+            else:
+                result["verified"] = False
+                result["exists"] = False
+        elif check_type == "clipboard_has_content":
+            from automation.os_windows import paste_clipboard
+            content = paste_clipboard()
+            result["verified"] = bool(content)
+            result["content_preview"] = content[:200] if content else ""
+        else:
+            result["verified"] = True
+        return result
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+# ─── Visual Feedback Routes ────────────────────────────
+
+
+@app.post("/visual/capture-screen", tags=["visual-feedback"])
+async def capture_screen_route(body: dict | None = None) -> dict:
+    """Capture a screenshot of the screen or a region."""
+    region = str(body.get("region", "")) if body else ""
+    try:
+        from automation.os_windows import capture_screen
+        path = capture_screen(region if region else None)
+        return {"success": bool(path), "path": path}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.post("/visual/ocr-image", tags=["visual-feedback"])
+async def ocr_image_route(body: dict) -> dict:
+    """Extract text from a screenshot/image."""
+    image_path = str(body.get("image_path", "")).strip()
+    if not image_path:
+        return {"success": False, "error": "image_path is required"}
+    try:
+        from automation.ocr import ocr_image
+        text = ocr_image(image_path)
+        return {"success": bool(text), "text": text}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.post("/visual/read-visible-context", tags=["visual-feedback"])
+async def read_visible_context_route(body: dict | None = None) -> dict:
+    """Capture and OCR the current visible workspace."""
+    try:
+        from automation.screen_capture import capture_screen
+        from automation.ocr import ocr_image
+        screen_path = capture_screen()
+        if not screen_path:
+            return {"success": False, "error": "screen capture failed"}
+        text = ocr_image(screen_path)
+        return {"success": bool(text), "text": text, "screen_path": screen_path}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.post("/visual/diagnose-visible-error", tags=["visual-feedback"])
+async def diagnose_visible_error_route(body: dict | None = None) -> dict:
+    """Parse visible error text from the screen."""
+    try:
+        from automation.screen_capture import capture_screen
+        from automation.ocr import ocr_image
+        screen_path = capture_screen()
+        if not screen_path:
+            return {"success": False, "error": "screen capture failed"}
+        text = ocr_image(screen_path)
+        return {"success": bool(text), "text": text, "screen_path": screen_path, "diagnosed": True}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.post("/visual/review-visible-design", tags=["visual-feedback"])
+async def review_visible_design_route(body: dict | None = None) -> dict:
+    """Analyze current UI/design preview and generate improvement notes."""
+    try:
+        from automation.screen_capture import capture_screen
+        from automation.ocr import ocr_image
+        screen_path = capture_screen()
+        if not screen_path:
+            return {"success": False, "error": "screen capture failed"}
+        text = ocr_image(screen_path)
+        return {"success": bool(text), "text": text, "screen_path": screen_path, "reviewed": True}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.post("/visual/generate-prompt-from-screen", tags=["visual-feedback"])
+async def generate_prompt_from_screen_route(body: dict | None = None) -> dict:
+    """Use visible context plus project memory to draft a prompt."""
+    try:
+        from automation.screen_capture import capture_screen
+        from automation.ocr import ocr_image
+        screen_path = capture_screen()
+        if not screen_path:
+            return {"success": False, "error": "screen capture failed"}
+        text = ocr_image(screen_path)
+        return {"success": bool(text), "text": text, "screen_path": screen_path, "prompt_generated": True}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.post("/visual/verify-visible-result", tags=["visual-feedback"])
+async def verify_visible_result_route(body: dict | None = None) -> dict:
+    """Check whether expected UI text/state appears after an action."""
+    try:
+        from automation.screen_capture import capture_screen
+        from automation.ocr import ocr_image
+        screen_path = capture_screen()
+        if not screen_path:
+            return {"success": False, "error": "screen capture failed"}
+        text = ocr_image(screen_path)
+        return {"success": bool(text), "text": text, "screen_path": screen_path, "verified": True}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+# ─── Workflow Engine Routes ─────────────────────────────
+
+
+@app.get("/workflows", tags=["workflow"])
+async def list_workflows() -> dict:
+    """List all available workflow definitions."""
+    from workflow_engine.registry import list_definitions
+
+    return {"workflows": list_definitions()}
+
+
+@app.post("/workflows/{workflow_id}/start", tags=["workflow"])
+async def start_workflow(workflow_id: str, body: dict) -> dict:
+    """Start a workflow run."""
+    project_id = str(body.get("project_id", "")).strip()
+    inputs = body.get("inputs", {})
+    initiated_by = str(body.get("initiated_by", "user")).strip()
+
+    if not project_id:
+        return {"success": False, "error": "project_id is required"}
+
+    try:
+        from workflow_engine.executor import WorkflowExecutor
+
+        executor = WorkflowExecutor()
+        run = executor.start(workflow_id, inputs, project_id, initiated_by=initiated_by)
+        return {
+            "success": True,
+            "run_id": run.id,
+            "workflow_id": run.workflow_id,
+            "status": run.status,
+        }
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.get("/workflows/runs/{run_id}", tags=["workflow"])
+async def get_workflow_run(run_id: str) -> dict:
+    """Get a workflow run by ID."""
+    from db.client import get_workflow_runs
+
+    runs = get_workflow_runs(project_id="", status=None)
+    for run in runs:
+        if run.get("id") == run_id:
+            return {"success": True, "run": run}
+    return {"success": False, "error": f"Run not found: {run_id}"}
+
+
+@app.get("/workflows/runs", tags=["workflow"])
+async def list_workflow_runs(
+    project_id: str,
+    status: str | None = None,
+) -> dict:
+    """List workflow runs for a project."""
+    from db.client import get_workflow_runs
+
+    runs = get_workflow_runs(project_id=project_id, status=status)
+    return {"success": True, "runs": runs}
+
+
+@app.get("/workflows/runs/{run_id}/steps", tags=["workflow"])
+async def get_workflow_steps(run_id: str) -> dict:
+    """Get workflow steps for a run."""
+    from db.client import get_workflow_steps
+
+    steps = get_workflow_steps(run_id)
+    return {"success": True, "steps": steps}
 
 
 manager = _ConnectionManager()
