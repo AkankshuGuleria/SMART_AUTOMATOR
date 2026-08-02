@@ -11,6 +11,15 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from decision_engine.tools import Tool
+    from workflow_engine.schema import StepDefinition
+
+
+def _policy_for(tool: Tool | dict | None) -> str:
+    if tool is None:
+        return "auto_execute"
+    if isinstance(tool, dict):
+        return str(tool.get("policy", "auto_execute"))
+    return getattr(tool, "policy", "auto_execute")
 
 
 def resolve_gates(
@@ -39,7 +48,7 @@ def resolve_gates(
     while i < len(steps):
         step = steps[i]
         tool = tool_registry.get(step.tool)
-        policy = tool.policy if tool else "auto_execute"
+        policy = _policy_for(tool)
 
         if policy in ("confirm_once", "require_approval"):
             gates.append(i)
@@ -48,7 +57,7 @@ def resolve_gates(
             # Stop when we hit a higher risk tier.
             while i < len(steps):
                 next_tool = tool_registry.get(steps[i].tool)
-                next_policy = next_tool.policy if next_tool else "auto_execute"
+                next_policy = _policy_for(next_tool)
                 if next_policy == "auto_execute":
                     # Lower tier — continue
                     i += 1

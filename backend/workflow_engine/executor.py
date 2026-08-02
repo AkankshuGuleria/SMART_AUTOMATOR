@@ -121,10 +121,14 @@ class WorkflowExecutor:
         if not checkpoints:
             raise ValueError(f"No checkpoint found for run {run_id}")
 
-        # The latest checkpoint filename is {run_id}_{step_id}.ckpt
         last_checkpoint = checkpoints[-1]
         step_id = Path(last_checkpoint).stem.replace(f"{run_id}_", "")
+        is_gate_checkpoint = step_id.startswith("gate_")
+        if is_gate_checkpoint:
+            step_id = step_id.removeprefix("gate_")
         context = load_checkpoint(run_id, step_id)
+        if context is None and is_gate_checkpoint:
+            context = load_checkpoint(run_id, f"gate_{step_id}")
         if context is None:
             raise ValueError(f"Failed to load checkpoint for run {run_id}, step {step_id}")
 
@@ -142,7 +146,7 @@ class WorkflowExecutor:
         resume_from = 0
         for i, step_def in enumerate(definition.steps):
             if step_def.id == step_id:
-                resume_from = i + 1
+                resume_from = i if is_gate_checkpoint else i + 1
                 break
 
         # Resolve gates again
@@ -189,7 +193,12 @@ class WorkflowExecutor:
         if not checkpoints:
             raise ValueError(f"No checkpoint found for run {run_id}")
         step_id = Path(checkpoints[-1]).stem.replace(f"{run_id}_", "")
+        is_gate_checkpoint = step_id.startswith("gate_")
+        if is_gate_checkpoint:
+            step_id = step_id.removeprefix("gate_")
         context = load_checkpoint(run_id, step_id)
+        if context is None and is_gate_checkpoint:
+            context = load_checkpoint(run_id, f"gate_{step_id}")
         if context is None:
             raise ValueError(f"Failed to load checkpoint for run {run_id}")
 
@@ -200,10 +209,10 @@ class WorkflowExecutor:
         resume_from = 0
         for i, step_def in enumerate(definition.steps):
             if step_def.id == step_id:
-                resume_from = i + 1
+                resume_from = i if is_gate_checkpoint else i + 1
                 break
 
-        self._execute_steps_from(definition, run, gate_set, context, resume_from)
+        self._execute_steps_from(definition, run, gate_set, context, resume_from, skip_gate_at=resume_from)
 
         return run
 
@@ -343,18 +352,33 @@ class WorkflowExecutor:
         gate_set: set[int],
         context: ExecutionContext,
         start_index: int,
+        skip_gate_at: int | None = None,
     ) -> None:
         """Execute steps starting from a given index, pausing at gates."""
         for i in range(start_index, len(definition.steps)):
             step_def = definition.steps[i]
 
-            if i in gate_set:
+            if i in gate_set and i != skip_gate_at:
                 run.status = "awaiting_approval"
                 logger.info(
                     "workflow_executor: paused at gate | run=%s step_index=%d tool=%s",
                     run.id, i, step_def.tool,
                 )
-                save_checkpoint(run.id, step_def.id, context)
+                rendered_inputs = self._render_inputs(step_def, context)
+                try:
+                    insert_workflow_step(
+                        run_id=run.id,
+                        step_def_id=step_def.id,
+                        tool=step_def.tool,
+                        policy=self._policy_for_tool(step_def.tool),
+                        status="waiting_for_approval",
+                        rendered_inputs_json=json.dumps(rendered_inputs),
+                        output_json=None,
+                        redactions_json=json.dumps(context.redactions),
+                    )
+                except Exception as exc:
+                    logger.warning("workflow_executor: waiting step insert failed — %s", exc)
+                save_checkpoint(run.id, f"gate_{step_def.id}", context)
                 try:
                     update_workflow_run_status(run.id, "awaiting_approval")
                 except Exception as exc:
@@ -371,6 +395,24 @@ class WorkflowExecutor:
             logger.warning("workflow_executor: DB status update failed — %s", exc)
         logger.info("workflow_executor: completed | run=%s", run.id)
 
+    def _policy_for_tool(self, tool_name: str) -> str:
+        registry_tool = self._tool_registry.get(tool_name)
+        if isinstance(registry_tool, dict):
+            return str(registry_tool.get("policy", "auto_execute"))
+        return getattr(registry_tool, "policy", "auto_execute")
+
+    def _render_inputs(self, step_def: StepDefinition, context: ExecutionContext) -> dict[str, Any]:
+        rendered_inputs: dict[str, Any] = {}
+        for key, value in step_def.inputs.items():
+            if isinstance(value, str) and "{{" in value:
+                rendered_inputs[key] = resolve_template(value, {
+                    "inputs": context.inputs,
+                    "step_outputs": context.step_outputs,
+                })
+            else:
+                rendered_inputs[key] = value
+        return rendered_inputs
+
     def _execute_step(
         self,
         step_def: StepDefinition,
@@ -383,13 +425,7 @@ class WorkflowExecutor:
         tool = get_tool(tool_name)
 
         # Determine policy from tool registry
-        policy = "auto_execute"
-        if tool_name in self._tool_registry:
-            registry_tool = self._tool_registry[tool_name]
-            if hasattr(registry_tool, "policy"):
-                policy = registry_tool.policy
-            elif isinstance(registry_tool, dict) and "policy" in registry_tool:
-                policy = registry_tool["policy"]
+        policy = self._policy_for_tool(tool_name)
 
         # Insert step into DB
         step_db_id = None
@@ -430,15 +466,7 @@ class WorkflowExecutor:
             return
 
         # Resolve templated inputs
-        rendered_inputs: dict[str, Any] = {}
-        for key, value in step_def.inputs.items():
-            if isinstance(value, str) and "{{" in value:
-                rendered_inputs[key] = resolve_template(value, {
-                    "inputs": context.inputs,
-                    "step_outputs": context.step_outputs,
-                })
-            else:
-                rendered_inputs[key] = value
+        rendered_inputs = self._render_inputs(step_def, context)
 
         # Check privacy guardrail on rendered inputs
         input_text = str(rendered_inputs)

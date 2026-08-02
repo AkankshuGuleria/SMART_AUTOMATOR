@@ -21,3 +21,17 @@ def pytest_sessionfinish(session, exitstatus):
     basetemp = Path(session.config.rootdir) / ".pytest-tmp"
     if basetemp.exists():
         shutil.rmtree(basetemp, ignore_errors=True)
+
+
+# Reset cooldowns before each test so module-level timestamps from a previous
+# test (e.g., all backends failed → cooldown active) don't block the next test.
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _reset_cooldowns():
+    from ai.bedrock_client import reset_embedding_cooldown, reset_llm_cooldown
+
+    reset_embedding_cooldown()
+    reset_llm_cooldown()
+    yield

@@ -53,16 +53,19 @@ def test_project_summary_route(monkeypatch):
 
 
 def test_cross_app_tasks_route():
-    response = client.post("/cross-app/tasks", json={
-        "task_id": "task-test-1",
-        "action": "drive_tool",
-        "params": {"tool": "git", "repo_path": "d:/AUTOMATA", "command": "status"}
-    })
+    with patch("agent_actions.submit_cross_app_task", return_value={"task_id": "task-test-1", "status": "queued"}) as mock_submit:
+        response = client.post("/cross-app/tasks", json={
+            "task_id": "task-test-1",
+            "action": "copy_to_clipboard",
+            "params": {"text": "hello"}
+        })
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] in ("queued", "already_running")
+    assert data["status"] == "queued"
+    mock_submit.assert_called_once_with("task-test-1", "copy_to_clipboard", {"text": "hello"})
 
-    status_resp = client.get("/cross-app/tasks/task-test-1")
+    with patch("agent_actions.cross_app_task_status", return_value={"task_id": "task-test-1", "status": "completed"}):
+        status_resp = client.get("/cross-app/tasks/task-test-1")
     assert status_resp.status_code == 200
     status_data = status_resp.json()
     assert status_data["task_id"] == "task-test-1"

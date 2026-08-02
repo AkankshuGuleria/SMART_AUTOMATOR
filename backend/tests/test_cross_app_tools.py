@@ -9,6 +9,7 @@ No live OS calls are made — tool dispatch is tested via execute_tool.
 """
 
 from decision_engine.tools import execute_tool, get_tool, get_tool_descriptions
+from unittest.mock import patch
 
 
 def test_copy_to_clipboard_tool_registered() -> None:
@@ -121,3 +122,21 @@ def test_safe_keystroke_accepted_by_tool() -> None:
     # The tool may succeed or fail depending on the OS environment,
     # but it should not return an error about the keystroke being unsafe.
     assert "unsafe" not in result.get("error", "").lower()
+
+
+@patch("automation.os_windows.send_keystrokes", return_value=True)
+def test_paste_clipboard_sends_paste_keystroke(mock_send) -> None:
+    result = execute_tool("paste_clipboard", {})
+    assert result["success"] is True
+    assert result["pasted"] is True
+    assert result["keystrokes"] == "ctrl+v"
+    mock_send.assert_called_once_with("ctrl+v")
+
+
+@patch("automation.os_windows.read_clipboard", return_value="copied prompt")
+def test_verify_result_uses_clipboard_read_not_paste(mock_read) -> None:
+    result = execute_tool("verify_result", {"type": "clipboard_has_content"})
+    assert result["success"] is True
+    assert result["verified"] is True
+    assert result["content_preview"] == "copied prompt"
+    mock_read.assert_called_once()

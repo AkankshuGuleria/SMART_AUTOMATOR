@@ -1,7 +1,7 @@
 # ROADMAP.md — 20-Day Build Plan
 
 ## Current Phase
-> **Update this line as you progress:** `Phase 2 - In Progress.`
+> **Update this line as you progress:** `Phase 5 - Chat-first UI redesign: Complete. All screens polished and verified.`
 
 ---
 
@@ -100,7 +100,7 @@
 ## Phase 5 (Day 20): Polish & submission
 - [ ] Feature phase context written for MVP-winning cross-app control
       actions (`FEATURES_PHASE.md`) before implementation.
-- [ ] Cross-app control actions wired safely: clipboard, open app/URL,
+- [x] Cross-app control actions wired safely: clipboard, open app/URL,
       focus app, paste, limited keystrokes, prompt submission, result
       verification.
 - [ ] External prompt handoff policy implemented: copy is safe, paste
@@ -111,7 +111,7 @@
 - [ ] Workflow Engine MVP slice implemented (`WORKFLOW_ENGINE.md`):
       `chatgpt_prompt_handoff_v1` runs through derived approval gates,
       checkpointing, verification, and decision-log provenance.
-- [ ] Chat-first UI pass: persistent chat bar, live project cards, inline action cards, command palette (`Cmd/Ctrl+K`), activity feed.
+- [x] Chat-first UI pass: persistent chat bar, live project cards, inline action cards, command palette (`Cmd/Ctrl+K`), activity feed.
 - [ ] Intent routing wired: NLU chat intents route through `decision_engine/intent_parser.py` → planner → execution.
 - [ ] System command execution wired with provenance and undo hints.
 - [ ] External agent bridge wired (`backend/automation/agent_bridge.py`) with graceful fallback for unavailable tools.
@@ -137,3 +137,4 @@
 | Decision Engine scope slips into the last 2 days | Medium | Treat Phase 4.5 as cuttable; Phases 1–4 alone are a complete, demoable submission | Open |
 | Autonomous action surprises/annoys the developer in the demo | Low-Medium | Default to suggest-not-execute for anything environment-changing (`PROJECT.md` §9) | Open |
 | Chat-first redesign breaks mobile/small viewport usability | Medium | Keep responsive layout and keyboard-first command palette as fallback | Open |
+| Reasoning provider tests leak settings state in full-suite order | Medium | Provider-order tests pass in isolation; isolate `config.settings` mutation or reset module state in test fixtures | Open |

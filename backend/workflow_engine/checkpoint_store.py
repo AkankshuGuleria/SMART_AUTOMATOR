@@ -81,7 +81,10 @@ def load_checkpoint(run_id: str, step_id: str) -> ExecutionContext | None:
 
 def list_checkpoints(run_id: str) -> list[str]:
     """List all checkpoints for a given run."""
-    checkpoints = sorted(_CHECKPOINT_DIR.glob(f"{run_id}_*.ckpt"))
+    checkpoints = sorted(
+        _CHECKPOINT_DIR.glob(f"{run_id}_*.ckpt"),
+        key=lambda path: path.stat().st_mtime,
+    )
     return [str(p) for p in checkpoints]
 
 

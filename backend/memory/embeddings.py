@@ -21,17 +21,51 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _pad_to_db_dimension(vector: list[float] | None) -> list[float] | None:
+    """Pad or truncate an embedding vector to match the DB column dimension.
+
+    Ollama's nomic-embed-text produces 768-dim vectors, but the DB columns
+    were provisioned with VECTOR(1024) (via EMBEDDING_DIMENSION=1024 in .env
+    for Bedrock's amazon.titan-embed-text-v2:0).  This function bridges the
+    gap by zero-padding the vector so it matches the configured dimension.
+
+    If EMBEDDING_DIMENSION is 0 or unset, the vector is returned unmodified.
+    """
+    if vector is None:
+        return None
+
+    from config import settings
+    target_dim = settings.embedding_dimension
+    if target_dim <= 0 or len(vector) == target_dim:
+        return vector
+
+    if len(vector) > target_dim:
+        # Truncate (Bedrock model with higher dim than DB)
+        return vector[:target_dim]
+
+    # Pad with zeros (Ollama nomic-embed-text: 768 → Bedrock: 1024)
+    padded = vector + [0.0] * (target_dim - len(vector))
+    logger.debug(
+        "Padded embedding from %d to %d dimensions (model dim mismatch)",
+        len(vector),
+        target_dim,
+    )
+    return padded
+
+
 def generate_embedding(text: str) -> list[float] | None:
     """
     Generate a vector embedding for the given text.
 
-    Currently uses Ollama (free, local). When Bedrock API keys are
-    available, uncomment the Bedrock section in ai/bedrock_client.py
-    and set EMBEDDING_MODEL_ID + EMBEDDING_DIMENSION in .env to switch.
+    Uses Ollama (free, local) when available, falling back to None if
+    Ollama is not running.  When Bedrock API keys are configured, the
+    Bedrock embedding model is used instead — set EMBEDDING_MODEL_ID +
+    EMBEDDING_DIMENSION in .env to switch.
 
     Returns:
-        A list of floats (the embedding vector) on success.
-        None if the embedding backend is not available or the call fails.
+        A list of floats (padded to match the DB VECTOR(n) column dimension)
+        on success.  None if the embedding backend is not available or
+        the call fails.
     """
     from ai.bedrock_client import invoke_embedding
 
@@ -44,7 +78,7 @@ def generate_embedding(text: str) -> list[float] | None:
         )
         return None
 
-    return result
+    return _pad_to_db_dimension(result)
 
 
 def batch_generate_embeddings(texts: list[str]) -> list[list[float] | None]:

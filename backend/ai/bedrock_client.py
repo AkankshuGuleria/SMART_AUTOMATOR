@@ -12,14 +12,29 @@ Ref:     ARCHITECTURE.md §3.4, §3.2b, TECH_STACK.md "AI".
 """
 
 import logging
+import time
 
 logger = logging.getLogger(__name__)
+
+# Cooldown: if invoke_embedding returned None within this window, skip backend
+# calls entirely to avoid hammering failing APIs (e.g., WinError 10048, bad keys).
+# Reset automatically when a backend succeeds or becomes newly available.
+# See SKILLS.md §4 — idempotent, graceful degradation.
+_EMBEDDING_COOLDOWN_SECONDS = 30.0
+_last_embedding_fail_time: float = 0.0
 
 # Timeout for a single LLM invocation (seconds).
 LLM_TIMEOUT_SECONDS = 30
 
 # Maximum retry attempts on transient errors.
 LLM_MAX_RETRIES = 3
+
+# Cooldown for reasoning (LLM chat) calls — mirrors the embedding cooldown.
+# If all LLM backends were exhausted within this window, skip backend attempts
+# in invoke_reasoning too, so chat routes return the "no backend" message
+# instantly instead of waiting for timeouts on each provider.
+_LLM_COOLDOWN_SECONDS = 30.0
+_last_llm_fail_time: float = 0.0
 
 # ─── Ollama Configuration ──────────────────────────────────────────────
 OLLAMA_BASE_URL = "http://localhost:11434"
@@ -43,6 +58,7 @@ def _get_ollama_available() -> bool:
 def _invoke_ollama_chat(system_prompt: str, user_message: str) -> str | None:
     """Call Ollama for text generation."""
     import json
+    import urllib.error
     import urllib.request
     try:
         payload = json.dumps({
@@ -65,7 +81,13 @@ def _invoke_ollama_chat(system_prompt: str, user_message: str) -> str | None:
         with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
             if resp.status == 200:
                 body = json.loads(resp.read().decode("utf-8"))
-                return body.get("response", "")
+                response_text = body.get("response", "")
+                if response_text:
+                    logger.info("LLM: Ollama succeeded")
+                    return response_text
+                logger.warning("Ollama chat returned empty response")
+    except urllib.error.HTTPError as exc:
+        logger.warning("Ollama chat call failed — HTTP %s", exc.code)
     except Exception as exc:
         logger.warning("Ollama chat call failed — %s", exc)
     return None
@@ -568,8 +590,25 @@ def invoke_reasoning(
     retrieved_memories: list[dict] | None = None,
     reasoning_mode: str | None = None,
 ) -> str | None:
-    """Generate a grounded response using the configured LLM backend."""
+    """Generate a grounded response using the configured LLM backend.
+
+    Uses a cooldown: if all backends failed within the last
+    ``_LLM_COOLDOWN_SECONDS``, returns ``None`` immediately so the caller's
+    fallback message is shown without waiting for per-provider timeouts.
+    """
+    global _last_llm_fail_time
     from config import settings
+
+    # Cooldown: if we just failed, return None immediately so the route can
+    # show the "no backend" message without hanging on retries.
+    elapsed = time.monotonic() - _last_llm_fail_time
+    if elapsed < _LLM_COOLDOWN_SECONDS:
+        logger.debug(
+            "invoke_reasoning: skipping (cooldown active, %.1fs elapsed, %.1fs remaining)",
+            elapsed,
+            _LLM_COOLDOWN_SECONDS - elapsed,
+        )
+        return None
 
     grounded_prompt = _build_grounded_prompt(system_prompt, user_message, retrieved_memories)
 
@@ -602,9 +641,14 @@ def invoke_reasoning(
         if not _get_ollama_available():
             logger.warning("invoke_reasoning: local mode selected but Ollama is unavailable")
             print(_get_local_help())
+            _all_llm_backends_exhausted()
             return None
         result = _try_provider("ollama", _invoke_ollama_chat)
-        return result
+        if result:
+            _last_llm_fail_time = 0.0
+            return result
+        _all_llm_backends_exhausted()
+        return None
 
     if mode == "cloud":
         groq_key = getattr(settings, "groq_api_key", "")
@@ -630,9 +674,11 @@ def invoke_reasoning(
         if settings.bedrock_available:
             result = _try_provider("bedrock", _invoke_bedrock_chat)
             if result:
+                _last_llm_fail_time = 0.0
                 return result
 
         logger.warning("invoke_reasoning: No cloud LLM backend available")
+        _all_llm_backends_exhausted()
         return None
 
     # auto mode: try cloud providers first, then Bedrock, then Ollama as local fallback.
@@ -654,25 +700,93 @@ def invoke_reasoning(
         if api_key:
             result = _try_provider(provider_name, func, api_key)
             if result:
+                _last_llm_fail_time = 0.0
                 return result
 
     if settings.bedrock_available:
         result = _try_provider("bedrock", _invoke_bedrock_chat)
         if result:
+            _last_llm_fail_time = 0.0
             return result
 
     if _get_ollama_available():
         result = _try_provider("ollama", _invoke_ollama_chat)
         if result:
+            _last_llm_fail_time = 0.0
             return result
 
     logger.warning("invoke_reasoning: No LLM backend available")
+    _all_llm_backends_exhausted()
     return None
 
 
+def _all_backends_exhausted():
+    """Mark that all embedding backends have been tried and failed.
+
+    Sets a cooldown timestamp so subsequent calls within the cooldown window
+    skip backend attempts entirely, preventing continuous retry spam (e.g.
+    WinError 10048 socket exhaustion). The cooldown auto-expires.
+    """
+    global _last_embedding_fail_time
+    _last_embedding_fail_time = time.monotonic()
+    logger.info(
+        "Embedding cooldown set for %.0fs — all backends exhausted",
+        _EMBEDDING_COOLDOWN_SECONDS,
+    )
+
+
+def _all_llm_backends_exhausted():
+    """Mark that all LLM backends have been tried and failed.
+
+    Sets a cooldown timestamp so subsequent ``invoke_reasoning`` calls within
+    the cooldown window return ``None`` immediately instead of retrying all
+    providers and waiting on per-provider timeouts.
+    """
+    global _last_llm_fail_time
+    _last_llm_fail_time = time.monotonic()
+    logger.info(
+        "LLM cooldown set for %.0fs — all backends exhausted",
+        _LLM_COOLDOWN_SECONDS,
+    )
+
+
+def reset_embedding_cooldown():
+    """Clear the embedding cooldown so backends will be retried immediately.
+
+    Call this when the user configures new API keys or starts a local LLM.
+    """
+    global _last_embedding_fail_time
+    _last_embedding_fail_time = 0.0
+    logger.info("Embedding cooldown reset — backends will be retried on next call")
+
+
+def reset_llm_cooldown():
+    """Clear the LLM reasoning cooldown so backends will be retried immediately."""
+    global _last_llm_fail_time
+    _last_llm_fail_time = 0.0
+    logger.info("LLM cooldown reset — backends will be retried on next call")
+
+
 def invoke_embedding(text: str) -> list[float] | None:
-    """Generate a vector embedding for the given text."""
+    """Generate a vector embedding for the given text.
+
+    Uses a cooldown: if all backends failed within the last
+    ``_EMBEDDING_COOLDOWN_SECONDS``, returns ``None`` immediately
+    without attempting any backend calls. This prevents continuous
+    retry spam when no backend is reachable.
+    """
+    global _last_embedding_fail_time
     from config import settings
+
+    # Cooldown: skip backend calls if we just failed within the cooldown window.
+    elapsed = time.monotonic() - _last_embedding_fail_time
+    if elapsed < _EMBEDDING_COOLDOWN_SECONDS:
+        logger.debug(
+            "invoke_embedding: skipping (cooldown active, %.1fs elapsed, %.1fs remaining)",
+            elapsed,
+            _EMBEDDING_COOLDOWN_SECONDS - elapsed,
+        )
+        return None
 
     mode = getattr(settings, "reasoning_mode", "auto").lower()
 
@@ -683,9 +797,11 @@ def invoke_embedding(text: str) -> list[float] | None:
             result = _invoke_ollama_embedding(text)
             if result:
                 logger.info("Embedding: Ollama succeeded")
+                _last_embedding_fail_time = 0.0
                 return result
             logger.warning("Embedding: Ollama failed")
         logger.warning("invoke_embedding: local mode but Ollama unavailable")
+        _all_backends_exhausted()
         return None
 
     # Cloud mode: try cloud embeddings only
@@ -696,6 +812,7 @@ def invoke_embedding(text: str) -> list[float] | None:
             result = _invoke_cohere_embedding(cohere_key, text)
             if result:
                 logger.info("Embedding: Cohere succeeded")
+                _last_embedding_fail_time = 0.0
                 return result
             logger.warning("Embedding: Cohere failed")
 
@@ -706,6 +823,7 @@ def invoke_embedding(text: str) -> list[float] | None:
             result = _invoke_groq_embedding(groq_emb_key, text)
             if result:
                 logger.info("Embedding: Groq succeeded")
+                _last_embedding_fail_time = 0.0
                 return result
             logger.warning("Embedding: Groq failed")
         elif groq_key:
@@ -713,6 +831,7 @@ def invoke_embedding(text: str) -> list[float] | None:
             result = _invoke_groq_embedding(groq_key, text)
             if result:
                 logger.info("Embedding: Groq (chat key) succeeded")
+                _last_embedding_fail_time = 0.0
                 return result
             logger.warning("Embedding: Groq (chat key) failed")
 
@@ -722,10 +841,12 @@ def invoke_embedding(text: str) -> list[float] | None:
             result = _invoke_gemini_embedding(gemini_key, text)
             if result:
                 logger.info("Embedding: Gemini succeeded")
+                _last_embedding_fail_time = 0.0
                 return result
             logger.warning("Embedding: Gemini failed")
 
         logger.warning("invoke_embedding: No cloud embedding backend available")
+        _all_backends_exhausted()
         return None
 
     # Auto mode: Ollama first, then cloud embeddings
@@ -735,6 +856,7 @@ def invoke_embedding(text: str) -> list[float] | None:
         result = _invoke_ollama_embedding(text)
         if result:
             logger.info("Embedding: Ollama succeeded")
+            _last_embedding_fail_time = 0.0
             return result
         logger.warning("Embedding: Ollama failed")
 
@@ -745,6 +867,7 @@ def invoke_embedding(text: str) -> list[float] | None:
         result = _invoke_cohere_embedding(cohere_key, text)
         if result:
             logger.info("Embedding: Cohere succeeded")
+            _last_embedding_fail_time = 0.0
             return result
         logger.warning("Embedding: Cohere failed")
 
@@ -755,6 +878,7 @@ def invoke_embedding(text: str) -> list[float] | None:
         result = _invoke_groq_embedding(groq_emb_key, text)
         if result:
             logger.info("Embedding fallback: Groq succeeded")
+            _last_embedding_fail_time = 0.0
             return result
         logger.warning("Embedding fallback: Groq failed")
     elif groq_key:
@@ -762,6 +886,7 @@ def invoke_embedding(text: str) -> list[float] | None:
         result = _invoke_groq_embedding(groq_key, text)
         if result:
             logger.info("Embedding fallback: Groq (chat key) succeeded")
+            _last_embedding_fail_time = 0.0
             return result
         logger.warning("Embedding fallback: Groq (chat key) failed")
 
@@ -771,15 +896,12 @@ def invoke_embedding(text: str) -> list[float] | None:
         result = _invoke_gemini_embedding(gemini_key, text)
         if result:
             logger.info("Embedding fallback: Gemini succeeded")
+            _last_embedding_fail_time = 0.0
             return result
         logger.warning("Embedding fallback: Gemini failed")
-        result = _invoke_cohere_embedding(cohere_key, text)
-        if result:
-            logger.info("Embedding fallback: Cohere succeeded")
-            return result
-        logger.warning("Embedding fallback: Cohere failed")
 
     logger.warning("invoke_embedding: No embedding backend available")
+    _all_backends_exhausted()
     return None
 
 
@@ -804,15 +926,14 @@ def _build_grounded_prompt(
         return user_message
 
     memory_context = "\n".join(
-        f"- [{m.get('table', 'unknown')}] {m.get('content', str(m))}"
+        f"- [{m.get('table', 'unknown')}] {m.get('content', str(m))} | {m.get('timestamp', '')}"
         for m in retrieved_memories[:10]
     )
     template = _load_prompt_template("grounded_answer")
     if not template:
         template = (
-            "Use the following retrieved memories as context. "
-            "Answer based only on these memories — do not fabricate facts not present.\n\n"
-            "Memories:\n{memory_context}\n\n"
-            "Question: {user_message}"
+            "Memory sources (table | content | timestamp):\n{memory_context}\n\n"
+            "Question: {user_message}\n\n"
+            "Answer using ONLY the memory entries above. Be direct. No filler."
         )
     return template.format(memory_context=memory_context, user_message=user_message)

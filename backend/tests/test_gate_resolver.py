@@ -6,6 +6,10 @@ workflow execution must pause for user approval based on the
 composition rule from FEATURES_PHASE.md §4 and WORKFLOW_ENGINE.md §2.
 """
 
+from decision_engine.tools import Tool
+from workflow_engine.gate_resolver import resolve_gates
+from workflow_engine.schema import StepDefinition
+
 
 def _resolve_gates(policies: list[str]) -> list[int]:
     """
@@ -144,3 +148,30 @@ def test_gate_resolver_is_pure_function() -> None:
     result2 = _resolve_gates(policies)
     assert result1 == result2
     assert result1 == [1, 3]
+
+
+def test_real_gate_resolver_accepts_dict_registry() -> None:
+    steps = [
+        StepDefinition(id="copy", tool="copy_to_clipboard"),
+        StepDefinition(id="focus", tool="focus_app"),
+        StepDefinition(id="submit", tool="submit_prompt_to_app"),
+    ]
+    registry = {
+        "copy_to_clipboard": {"policy": "auto_execute"},
+        "focus_app": {"policy": "confirm_once"},
+        "submit_prompt_to_app": {"policy": "require_approval"},
+    }
+    assert resolve_gates(steps, registry) == [1, 2]
+
+
+def test_real_gate_resolver_accepts_tool_registry() -> None:
+    noop = lambda params: {"success": True}
+    steps = [
+        StepDefinition(id="copy", tool="copy_to_clipboard"),
+        StepDefinition(id="paste", tool="paste_clipboard"),
+    ]
+    registry = {
+        "copy_to_clipboard": Tool("copy_to_clipboard", "", {}, noop, policy="auto_execute"),
+        "paste_clipboard": Tool("paste_clipboard", "", {}, noop, policy="confirm_once"),
+    }
+    assert resolve_gates(steps, registry) == [1]

@@ -205,6 +205,12 @@ def retrieve_by_vector(
         logger.error("retrieve_by_vector: Failed to generate embedding for query")
         return []
 
+    # Pad/truncate to match DB column dimension (Ollama 768 → DB 1024)
+    from memory.embeddings import _pad_to_db_dimension
+    query_embedding = _pad_to_db_dimension(query_embedding)
+    if query_embedding is None:
+        return []
+
     results = []
 
     # For each table, execute CockroachDB vector search

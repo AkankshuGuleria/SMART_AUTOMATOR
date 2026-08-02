@@ -51,4 +51,4 @@ def test_query_without_project_does_not_crash(client: TestClient) -> None:
     body = response.json()
     assert body["grounded"] is False
     assert body["memories"] == []
-    assert "No project was selected" in body["answer"]
+    assert "No project selected" in body["answer"]

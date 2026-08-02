@@ -792,6 +792,27 @@ def _dispatch_cross_app_action(action: str, params: dict[str, Any]) -> Any:
         return _execute_os_action(params)
     if action == "drive_tool":
         return _drive_tool(params)
+    if action == "copy_to_clipboard":
+        return copy_to_clipboard_action(str(params.get("text", "")))
+    if action == "paste_clipboard":
+        return paste_clipboard_action()
+    if action == "focus_app":
+        return focus_app_action(str(params.get("app_name", params.get("app", ""))))
+    if action == "send_keystroke":
+        return send_keystroke_action(str(params.get("keystrokes", "")))
+    if action == "submit_prompt_to_app":
+        return submit_prompt_to_app_action(
+            app_name=str(params.get("app_name", "")),
+            prompt_text=str(params.get("prompt", params.get("prompt_text", ""))),
+            url=str(params.get("url", "")),
+        )
+    if action == "verify_result":
+        return verify_result_action(
+            check_type=str(params.get("type", params.get("check_type", ""))),
+            target=str(params.get("target", "")),
+        )
+    if action in ("open_url", "open_app"):
+        return open_app_or_url(str(params.get("url", params.get("app_name", params.get("target", "")))))
     raise ValueError(f"Unknown cross-app action: {action}")
 
 
@@ -1049,8 +1070,8 @@ def paste_clipboard_action() -> dict[str, Any]:
     """Paste clipboard content into the active target app."""
     from automation.os_windows import paste_clipboard
 
-    text = paste_clipboard()
-    return {"success": bool(text), "action": "paste_clipboard", "content": text}
+    ok = paste_clipboard()
+    return {"success": ok, "action": "paste_clipboard", "pasted": ok, "keystrokes": "ctrl+v"}
 
 
 def focus_app_action(app_name: str) -> dict[str, Any]:
@@ -1070,8 +1091,18 @@ def send_keystroke_action(keystrokes: str) -> dict[str, Any]:
 
 
 def submit_prompt_to_app_action(app_name: str, prompt_text: str, url: str = "") -> dict[str, Any]:
-    """Submit a generated prompt to an external app (ChatGPT, Claude, Cursor, etc.)."""
-    from automation.os_windows import copy_to_clipboard, focus_app, launch_browser, paste_clipboard, send_keystrokes
+    """Submit a generated prompt to an external app (ChatGPT, Claude, Cursor, etc.).
+
+    Steps:
+    1. Copy full prompt text to clipboard (file-based for large text).
+    2. Open the browser URL (or desktop app) and bring it to the foreground.
+    3. Wait for the app to load.
+    4. Paste clipboard content into the active window (Ctrl+V).
+    5. Wait briefly for paste to complete.
+    6. Submit (Ctrl+Enter).
+    """
+    import time
+    from automation.os_windows import copy_to_clipboard, focus_app, launch_browser, launch_app, send_keystrokes
 
     steps: list[dict[str, Any]] = []
 
@@ -1088,14 +1119,59 @@ def submit_prompt_to_app_action(app_name: str, prompt_text: str, url: str = "") 
             focus_ok = focus_app(app_name)
             steps.append({"action": "focus_app", "success": focus_ok, "app": app_name})
 
-    paste_ok = paste_clipboard()
-    steps.append({"action": "paste_clipboard", "success": bool(paste_ok)})
+    time.sleep(2.0)
+
+    paste_ok = send_keystrokes("ctrl+v")
+    steps.append({"action": "paste_clipboard", "success": paste_ok, "keystrokes": "ctrl+v"})
+
+    time.sleep(0.5)
 
     submit_ok = send_keystrokes("ctrl+enter")
     steps.append({"action": "send_keystroke", "success": submit_ok, "keystrokes": "ctrl+enter"})
 
     all_success = all(s.get("success") for s in steps)
     return {"success": all_success, "action": "submit_prompt_to_app", "prompt_length": len(prompt_text), "steps": steps}
+
+
+def generate_prompt_for_app(
+    request_description: str,
+    app_name: str,
+    project_id: str | None = None,
+) -> str | None:
+    """Generate a detailed, self-contained prompt for an external AI app.
+
+    Given the developer's natural-language request (e.g. "open claude and
+    generate a prompt to create a UI/UX fix .md file"), use the reasoning
+    engine to produce a well-structured prompt that can be pasted directly
+    into Claude, ChatGPT, or another AI assistant.
+
+    Returns the generated prompt text, or None on failure.
+    """
+    # Deliberately pass an empty memories list — we want the LLM to generate
+    # a fresh prompt, not answer a factual question from stored memory.
+    memories: list[dict[str, Any]] = []
+
+    system_prompt = (
+        "You are a prompt engineer. Based on the developer's request, "
+        f"generate a detailed, well-structured prompt that they can paste "
+        f"into {app_name} to accomplish the task. The prompt should be clear, "
+        "specific, actionable, and self-contained — include all necessary "
+        "context about the project structure, file locations, and desired "
+        "output format. Do not reference that you are an AI or that you were "
+        "asked to generate a prompt. Output ONLY the prompt itself, no "
+        "explanation or preamble."
+    )
+
+    user_message = (
+        f"The developer wants to submit a prompt to {app_name}. "
+        f"Generate a prompt they can give to {app_name} to accomplish this task:\n\n"
+        f"Request: {request_description}\n\n"
+        f"Project: AUTOMATA — a hackathon developer-agent project with a "
+        f"React + TypeScript frontend and a FastAPI Python backend. The "
+        f"workspace is at D:\\AUTOMATA."
+    )
+
+    return _invoke_reasoning(system_prompt, user_message, memories)
 
 
 def verify_result_action(check_type: str, target: str = "") -> dict[str, Any]:
@@ -1110,8 +1186,8 @@ def verify_result_action(check_type: str, target: str = "") -> dict[str, Any]:
             result["verified"] = False
             result["exists"] = False
     elif check_type == "clipboard_has_content":
-        from automation.os_windows import paste_clipboard
-        content = paste_clipboard()
+        from automation.os_windows import read_clipboard
+        content = read_clipboard()
         result["verified"] = bool(content)
         result["content_preview"] = content[:200] if content else ""
     else:

@@ -265,6 +265,13 @@ export async function sendChatMessage(message: string, projectId?: string, activ
   });
 }
 
+export async function approveAction(actionType: string, params: Record<string, unknown>, projectId?: string, message?: string): Promise<{ action_type: string; executed: boolean; result: unknown }> {
+  return apiFetch("/chat/approve-action", {
+    method: "POST",
+    body: JSON.stringify({ action_type: actionType, params, project_id: projectId || null, message }),
+  });
+}
+
 export async function executeCommand(command: string, opts: { cwd?: string; allowExecute?: boolean; context?: string; sessionId?: string } = {}): Promise<CommandExecuteResponse> {
   return apiFetch<CommandExecuteResponse>("/commands/execute", {
     method: "POST",

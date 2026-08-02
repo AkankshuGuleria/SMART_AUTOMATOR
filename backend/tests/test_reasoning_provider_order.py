@@ -2,8 +2,20 @@ import io
 import types
 import urllib.error
 
+import pytest
+
 from ai import bedrock_client
 import config
+
+
+@pytest.fixture(autouse=True)
+def _reset_bedrock_cooldowns():
+    bedrock_client._last_llm_fail_time = 0.0
+    bedrock_client._last_embedding_fail_time = 0.0
+    yield
+    bedrock_client._last_llm_fail_time = 0.0
+    bedrock_client._last_embedding_fail_time = 0.0
+
 
 
 def test_gemini_chat_retries_with_alternate_model(monkeypatch):

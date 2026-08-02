@@ -735,8 +735,8 @@ def _tool_paste_clipboard(params: dict[str, Any]) -> dict[str, Any]:
     try:
         from automation.os_windows import paste_clipboard
 
-        text = paste_clipboard()
-        return {"success": bool(text), "pasted": bool(text), "content": text}
+        ok = paste_clipboard()
+        return {"success": ok, "pasted": ok, "keystrokes": "ctrl+v"}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
@@ -785,17 +785,42 @@ def _tool_send_keystroke(params: dict[str, Any]) -> dict[str, Any]:
 
 def _tool_submit_prompt_to_app(params: dict[str, Any]) -> dict[str, Any]:
     """Higher-level flow: generate prompt, open/focus app, copy, paste, optionally submit."""
+    import time
     app_name = str(params.get("app_name", "")).strip()
     prompt_text = str(params.get("prompt", "")).strip()
     url = str(params.get("url", "")).strip()
+
+    # If no explicit prompt text, try to generate one from the request description
     if not prompt_text:
-        return {"success": False, "error": "prompt is required"}
+        request_desc = (
+            params.get("request_description", "")
+            or params.get("message", "")
+            or params.get("raw", "")
+        )
+        target_app = url or app_name
+        if request_desc and target_app:
+            try:
+                from agent_actions import generate_prompt_for_app
+                generated = generate_prompt_for_app(request_desc, target_app)
+                if generated:
+                    prompt_text = generated
+            except Exception as exc:
+                logger.warning("_tool_submit_prompt_to_app: prompt generation failed | %s", exc)
+        if not prompt_text:
+            return {"success": False, "error": "prompt is required"}
+
     try:
-        from automation.os_windows import copy_to_clipboard, focus_app, launch_browser, paste_clipboard, send_keystrokes
+        from automation.os_windows import (
+            copy_to_clipboard,
+            focus_app,
+            launch_browser,
+            launch_app,
+            send_keystrokes,
+        )
 
         steps: list[dict[str, Any]] = []
 
-        # Step 1: Copy prompt to clipboard
+        # Step 1: Copy prompt to clipboard (file-based for large text)
         copy_ok = copy_to_clipboard(prompt_text)
         steps.append({"action": "copy_to_clipboard", "success": copy_ok})
 
@@ -810,11 +835,17 @@ def _tool_submit_prompt_to_app(params: dict[str, Any]) -> dict[str, Any]:
                 focus_ok = focus_app(app_name)
                 steps.append({"action": "focus_app", "success": focus_ok, "app": app_name})
 
-        # Step 3: Paste the prompt
-        paste_ok = paste_clipboard()
-        steps.append({"action": "paste_clipboard", "success": bool(paste_ok)})
+        # Step 3: Wait for app to load and focus
+        time.sleep(2.0)
 
-        # Step 4: Submit with Ctrl+Enter (common for chat apps)
+        # Step 4: Paste the prompt into the active window (Ctrl+V)
+        paste_ok = send_keystrokes("ctrl+v")
+        steps.append({"action": "paste_clipboard", "success": paste_ok, "keystrokes": "ctrl+v"})
+
+        # Step 5: Wait for paste to complete
+        time.sleep(0.5)
+
+        # Step 6: Submit with Ctrl+Enter (common for chat apps)
         submit_ok = send_keystrokes("ctrl+enter")
         steps.append({"action": "send_keystroke", "success": submit_ok, "keystrokes": "ctrl+enter"})
 
@@ -845,7 +876,8 @@ def _tool_verify_result(params: dict[str, Any]) -> dict[str, Any]:
                 result["verified"] = False
                 result["exists"] = False
         elif check_type == "clipboard_has_content":
-            content = paste_clipboard()
+            from automation.os_windows import read_clipboard
+            content = read_clipboard()
             result["verified"] = bool(content)
             result["content_preview"] = content[:200] if content else ""
         else:

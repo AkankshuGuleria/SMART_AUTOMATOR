@@ -273,9 +273,16 @@ def launch_app(app_name: str) -> bool:
 
 # ─── Cross-app control primitives ──────────────────────────────────────
 
+_CLIPBOARD_CMDLINE_LIMIT = 8000
+
+
 def copy_to_clipboard(text: str) -> bool:
     """
-    Copy the given text to the Windows clipboard via PowerShell Set-Clipboard.
+    Copy the given text to the Windows clipboard.
+
+    For text exceeding the Windows command-line length limit (~8191 chars),
+    a temp file is written and piped via ``Get-Content -Raw | Set-Clipboard``
+    so that arbitrarily large prompts are delivered intact.
 
     Returns True on success, False on failure.
     """
@@ -283,15 +290,41 @@ def copy_to_clipboard(text: str) -> bool:
         logger.warning("os_windows.copy_to_clipboard: empty text provided")
         return False
     try:
-        # Escape single quotes and wrap in single quotes for PowerShell
-        escaped = text.replace("'", "''")
-        completed = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", f"Set-Clipboard -Value '{escaped}'"],
-            shell=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        if len(text) <= _CLIPBOARD_CMDLINE_LIMIT:
+            # Short text — pass directly as a command-line argument
+            escaped = text.replace("'", "''")
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", f"Set-Clipboard -Value '{escaped}'"],
+                shell=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        else:
+            # Large text — write to a temp file and stream via Get-Content
+            # to avoid hitting Windows' ~8191 char command-line limit.
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".txt", prefix="automata_clip_")
+            try:
+                with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+                completed = subprocess.run(
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-Command",
+                        f"Get-Content -Path '{tmp_path}' -Raw | Set-Clipboard",
+                    ],
+                    shell=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
         if completed.returncode != 0:
             stderr = (completed.stderr or completed.stdout or "").strip()
             logger.warning("os_windows.copy_to_clipboard: Set-Clipboard failed — %s", stderr)
@@ -303,7 +336,7 @@ def copy_to_clipboard(text: str) -> bool:
         return False
 
 
-def paste_clipboard() -> str:
+def read_clipboard() -> str:
     """
     Retrieve the current clipboard content via PowerShell Get-Clipboard.
 
@@ -323,8 +356,18 @@ def paste_clipboard() -> str:
             return ""
         return completed.stdout
     except Exception as exc:
-        logger.error("os_windows.paste_clipboard: failed — %s", exc)
+        logger.error("os_windows.read_clipboard: failed — %s", exc)
         return ""
+
+
+def paste_clipboard() -> bool:
+    """
+    Paste the current clipboard content into the active window.
+
+    Clipboard reads are available through ``read_clipboard``. This function
+    performs the visible paste action used by cross-app controls.
+    """
+    return send_keystrokes("ctrl+v")
 
 
 def focus_app(app_name: str) -> bool:
@@ -371,7 +414,7 @@ def send_keystrokes(keystrokes: str) -> bool:
     Supports limited safe keys: Ctrl+V, Enter, Ctrl+L, Alt+Tab, Tab, Escape.
     Returns True on success, False on failure.
     """
-    safe_patterns = {"ctrl+v", "enter", "ctrl+l", "alt+tab", "tab", "escape"}
+    safe_patterns = {"ctrl+v", "enter", "ctrl+l", "ctrl+enter", "ctrl+return", "alt+tab", "tab", "escape"}
     normalized = keystrokes.lower().strip()
     if normalized not in safe_patterns:
         logger.warning(
@@ -388,6 +431,8 @@ def send_keystrokes(keystrokes: str) -> bool:
             "alt+tab": "%{tab}",
             "tab": "{tab}",
             "escape": "{esc}",
+            "ctrl+enter": "^~",
+            "ctrl+return": "^~",
         }
         ps_keys = mapping.get(normalized, keystrokes)
         script = f'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("{ps_keys}")'

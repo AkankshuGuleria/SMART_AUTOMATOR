@@ -29,7 +29,7 @@ steps:
   - id: copy_to_clipboard
     tool: copy_to_clipboard
     inputs:
-      text: "{{ steps.generate_prompt.output.result }}"
+      text: "{{ steps.generate_prompt.output.output }}"
     on_error: abort
   - id: open_chatgpt
     tool: open_url
@@ -45,7 +45,7 @@ steps:
     tool: submit_prompt_to_app
     inputs:
       url: "https://chatgpt.com"
-      prompt: "{{ steps.copy_to_clipboard.output.text }}"
+      prompt: "{{ steps.generate_prompt.output.output }}"
     on_error: abort
 outputs:
   - name: prompt_length

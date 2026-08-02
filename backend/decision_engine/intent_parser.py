@@ -29,6 +29,7 @@ class IntentType(str, Enum):
     CONTINUE_WORK = "continue_work"
     START_DEV_ENV = "start_dev_env"
     STOP_DEV_ENV = "stop_dev_env"
+    GIT_LOG = "git_log"
     OPEN_APP = "open_app"
     OPEN_BROWSER = "open_browser"
     SYSTEM_COMMAND = "system_command"
@@ -70,6 +71,26 @@ class IntentParser:
 
     # (IntentType, compiled_pattern)
     _patterns = [
+        # ── Compound: "open [ai_tool] and generate/give/send a prompt" ──────────
+        # Must appear BEFORE OPEN_BROWSER so that compound requests like
+        # "open claude and generate a prompt..." are routed to SUBMIT_PROMPT
+        # instead of being swallowed by the generic browser launcher.
+        (
+            IntentType.SUBMIT_PROMPT,
+            re.compile(
+                r"\b(?:open|launch)\s+(?:browser\s+(?:to\s+)?)?"
+                r"(claude|chatgpt|chat gpt|gpt|gemini|perplexity|copilot|openai|openai chat)\b"
+                r"\s+(?:and\s+(?:also\s+)?"
+                r"(?:"
+                r"(?:generate|genareate|create|write|draft|give|send|submit|prepare|make|hand\s*off|request|instruct)\b"
+                r"|ask\s+(?:it\s+)?(?:to\s+)?\w+"
+                r"|tell\s+(?:it\s+)?(?:to\s+)?\w+"
+                r"|instruct\s+(?:it\s+)?(?:to\s+)?\w+"
+                r"|have\s+(?:it\s+)?(?:to\s+)?\w+"
+                r"))\b",
+                re.IGNORECASE,
+            ),
+        ),
         # ── App / browser opening ──────────────────────────────────────────────
         (
             IntentType.OPEN_BROWSER,
@@ -225,6 +246,19 @@ class IntentParser:
             ),
         ),
 
+        # ── Git history queries ───────────────────────────────────────────────────
+        (
+            IntentType.GIT_LOG,
+            re.compile(
+                r"\b(?:last\s+commit|recent\s+commits|what\s+did\s+I\s+commit|"
+                r"what\s+was\s+(?:my\s+)?last\s+commit|git\s+log|"
+                r"show\s+me\s+(?:my\s+)?commits?|"
+                r"latest\s+commit|most\s+recent\s+commit|"
+                r"what\s+did\s+I\s+push|what\s+did\s+I\s+merge|"
+                r"when\s+did\s+I\s+commit|who\s+am\s+I\s+on\s+git)\b",
+                re.IGNORECASE,
+            ),
+        ),
         # ── Memory query (broad — keep near bottom) ────────────────────────────
         (
             IntentType.QUERY_MEMORY,
@@ -270,8 +304,9 @@ class IntentParser:
         (
             IntentType.SUBMIT_PROMPT,
             re.compile(
-                r"\b(?:submit|send|deliver|hand off|handoff|"
-                r"send the prompt|submit the prompt|send it)\b",
+                r"\b(?:submit|give|send|deliver|ask|tell|instruct|request|hand off|handoff|"
+                r"send the prompt|submit the prompt|give the prompt|"
+                r"give it|send it|ask it to)\b",
                 re.IGNORECASE,
             ),
         ),
@@ -360,9 +395,42 @@ class IntentParser:
 
                 # For open_browser / open_app, extract the full target from the raw message
                 target = project_hint or ""
+                app_name = ""
+                url = ""
+                prompt_text = ""
                 if intent in (IntentType.OPEN_BROWSER, IntentType.OPEN_APP):
                     # Use the full raw message as the target so agent_actions can parse it
                     target = text
+                elif intent == IntentType.SUBMIT_PROMPT:
+                    # Extract app_name and prompt from the compound message
+                    # Pattern: "open <app> and <action> <prompt>"
+                    import re as _re
+                    target = text
+                    # Extract app name from first capture group
+                    if m.groups():
+                        app_match = m.group(1)
+                        if app_match:
+                            app_name = app_match.lower()
+                    # Extract the prompt - everything after the trigger phrase
+                    # Match: ask (it) (to)? <rest>, tell (it) (to)? <rest>, etc.
+                    prompt_match = _re.search(
+                        r"\band\s+(?:also\s+)?"
+                        r"(?:"
+                        r"(?:generate|create|write|draft|give|send|submit|prepare|make|hand\s*off|request|instruct)\b\s*(.+)"
+                        r"|ask\s+(?:it\s+)?(?:to\s+)?\w+\s+(.+)"
+                        r"|tell\s+(?:it\s+)?(?:to\s+)?\w+\s+(.+)"
+                        r"|instruct\s+(?:it\s+)?(?:to\s+)?\w+\s+(.+)"
+                        r"|have\s+(?:it\s+)?(?:to\s+)?\w+\s+(.+)"
+                        r")",
+                        text,
+                        _re.IGNORECASE,
+                    )
+                    if prompt_match:
+                        # Find the first non-None group
+                        for g in prompt_match.groups():
+                            if g:
+                                prompt_text = g.strip()
+                                break
 
                 # Confidence is lower for broad patterns near the bottom
                 broad_intents = {
@@ -371,6 +439,7 @@ class IntentParser:
                     IntentType.GENERAL_CHAT,
                     IntentType.QUERY_MEMORY,
                     IntentType.OPEN_APP,
+                    IntentType.GIT_LOG,
                 }
                 confidence = 0.7 if intent in broad_intents else 0.9
 
@@ -382,6 +451,9 @@ class IntentParser:
                         "raw": text,
                         "project_hint": project_hint or "",
                         "target": target,
+                        "app_name": app_name,
+                        "url": url,
+                        "prompt": prompt_text,
                     },
                     raw=text,
                 )

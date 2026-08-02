@@ -22,6 +22,7 @@ import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.dialects.postgresql.base import PGDialect
@@ -1077,6 +1078,7 @@ def insert_workflow_step(
     step_def_id: str,
     tool: str,
     policy: str,
+    status: str = "running",
     rendered_inputs_json: str | None = None,
     output_json: str | None = None,
     redactions_json: str | None = None,
@@ -1097,7 +1099,7 @@ def insert_workflow_step(
                     "(id, run_id, step_def_id, tool, policy, status, "
                     "rendered_inputs_json, output_json, redactions_json, started_at) "
                     "VALUES "
-                    "(:id, :run_id, :step_def_id, :tool, :policy, 'running', "
+                    "(:id, :run_id, :step_def_id, :tool, :policy, :status, "
                     ":rendered_inputs_json, :output_json, :redactions_json, :started_at)"
                 ),
                 {
@@ -1106,6 +1108,7 @@ def insert_workflow_step(
                     "step_def_id": step_def_id,
                     "tool": tool,
                     "policy": policy,
+                    "status": status,
                     "rendered_inputs_json": rendered_inputs_json,
                     "output_json": output_json,
                     "redactions_json": redactions_json,
