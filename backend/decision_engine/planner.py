@@ -18,7 +18,7 @@ GUARDRAILS (encoded in ACTION_POLICY below):
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from db.client import insert_decision
@@ -27,39 +27,39 @@ logger = logging.getLogger(__name__)
 
 # Maps action types to their policy.
 ACTION_POLICY: dict[str, str] = {
-    "update_project_summary":         "auto_execute",
-    "regenerate_daily_brief":         "auto_execute",
-    "flag_related_todos":             "auto_execute",
-    "store_session_summary":          "auto_execute",
-    "suggest_next_task":              "auto_execute",
-    "chat_explain_repo":              "auto_execute",
-    "chat_open_browser":              "auto_execute",
-    "chat_open_app":                  "auto_execute",
-    "chat_system_command":            "suggest",
-    "chat_query_memory":              "auto_execute",
-    "chat_generate_prompt":           "auto_execute",
-    "chat_git_log":                   "auto_execute",
-    "chat_morning_brief":             "auto_execute",
-    "chat_continue_work":             "auto_execute",
-    "chat_generate_commit_message":   "suggest",
-    "chat_run_tests":                 "suggest",
-    "restore_workspace":              "suggest",
+    "update_project_summary": "auto_execute",
+    "regenerate_daily_brief": "auto_execute",
+    "flag_related_todos": "auto_execute",
+    "store_session_summary": "auto_execute",
+    "suggest_next_task": "auto_execute",
+    "chat_explain_repo": "auto_execute",
+    "chat_open_browser": "auto_execute",
+    "chat_open_app": "auto_execute",
+    "chat_system_command": "suggest",
+    "chat_query_memory": "auto_execute",
+    "chat_generate_prompt": "auto_execute",
+    "chat_git_log": "auto_execute",
+    "chat_morning_brief": "auto_execute",
+    "chat_continue_work": "auto_execute",
+    "chat_generate_commit_message": "suggest",
+    "chat_run_tests": "suggest",
+    "restore_workspace": "suggest",
     # Cross-app control actions
-    "copy_to_clipboard":              "auto_execute",
-    "paste_clipboard":                "confirm_once",
-    "open_url":                       "auto_execute",
-    "focus_app":                      "confirm_once",
-    "send_keystroke":                 "confirm_once",
-    "submit_prompt_to_app":           "require_approval",
-    "verify_result":                  "auto_execute",
+    "copy_to_clipboard": "auto_execute",
+    "paste_clipboard": "confirm_once",
+    "open_url": "auto_execute",
+    "focus_app": "confirm_once",
+    "send_keystroke": "confirm_once",
+    "submit_prompt_to_app": "require_approval",
+    "verify_result": "auto_execute",
     # Visual feedback actions
-    "capture_screen":                 "confirm_once",
-    "ocr_image":                      "auto_execute",
-    "read_visible_context":           "confirm_once",
-    "diagnose_visible_error":         "confirm_once",
-    "review_visible_design":          "confirm_once",
-    "generate_prompt_from_screen":    "auto_execute",
-    "verify_visible_result":          "auto_execute",
+    "capture_screen": "confirm_once",
+    "ocr_image": "auto_execute",
+    "read_visible_context": "confirm_once",
+    "diagnose_visible_error": "confirm_once",
+    "review_visible_design": "confirm_once",
+    "generate_prompt_from_screen": "auto_execute",
+    "verify_visible_result": "auto_execute",
 }
 
 
@@ -108,7 +108,8 @@ def plan(trigger: str, context: dict[str, Any]) -> dict[str, Any]:
             except Exception as exc:
                 logger.warning(
                     "plan: failed to log suggested action | type=%s error=%s",
-                    action["type"], exc,
+                    action["type"],
+                    exc,
                 )
             continue
 
@@ -139,39 +140,39 @@ def _execute_action(action: dict[str, Any]) -> dict | None:
     params = action.get("params", {})
 
     dispatch = {
-        "update_project_summary":       _execute_update_project_summary,
-        "regenerate_daily_brief":       _execute_regenerate_daily_brief,
-        "flag_related_todos":           _execute_flag_related_todos,
-        "store_session_summary":        _execute_store_session_summary,
-        "suggest_next_task":            _execute_suggest_next_task,
-        "chat_explain_repo":            _execute_chat_explain_repo,
-        "chat_continue_work":           _execute_chat_continue_work,
+        "update_project_summary": _execute_update_project_summary,
+        "regenerate_daily_brief": _execute_regenerate_daily_brief,
+        "flag_related_todos": _execute_flag_related_todos,
+        "store_session_summary": _execute_store_session_summary,
+        "suggest_next_task": _execute_suggest_next_task,
+        "chat_explain_repo": _execute_chat_explain_repo,
+        "chat_continue_work": _execute_chat_continue_work,
         "chat_generate_commit_message": _execute_chat_generate_commit_message,
-        "restore_workspace":            _execute_restore_workspace,
-        "chat_open_browser":            _execute_chat_open_browser,
-        "chat_open_app":                _execute_chat_open_app,
-        "chat_system_command":          _execute_chat_system_command,
-        "chat_query_memory":            _execute_chat_query_memory,
-        "chat_generate_prompt":         _execute_chat_generate_prompt,
-        "chat_git_log":                 _execute_chat_git_log,
-        "chat_morning_brief":           _execute_chat_morning_brief,
-        "chat_run_tests":               _execute_chat_run_tests,
+        "restore_workspace": _execute_restore_workspace,
+        "chat_open_browser": _execute_chat_open_browser,
+        "chat_open_app": _execute_chat_open_app,
+        "chat_system_command": _execute_chat_system_command,
+        "chat_query_memory": _execute_chat_query_memory,
+        "chat_generate_prompt": _execute_chat_generate_prompt,
+        "chat_git_log": _execute_chat_git_log,
+        "chat_morning_brief": _execute_chat_morning_brief,
+        "chat_run_tests": _execute_chat_run_tests,
         # Cross-app control actions
-        "copy_to_clipboard":            _execute_copy_to_clipboard,
-        "paste_clipboard":              _execute_paste_clipboard,
-        "open_url":                     _execute_open_url,
-        "focus_app":                    _execute_focus_app,
-        "send_keystroke":               _execute_send_keystroke,
-        "submit_prompt_to_app":         _execute_submit_prompt_to_app,
-        "verify_result":                _execute_verify_result,
+        "copy_to_clipboard": _execute_copy_to_clipboard,
+        "paste_clipboard": _execute_paste_clipboard,
+        "open_url": _execute_open_url,
+        "focus_app": _execute_focus_app,
+        "send_keystroke": _execute_send_keystroke,
+        "submit_prompt_to_app": _execute_submit_prompt_to_app,
+        "verify_result": _execute_verify_result,
         # Visual feedback actions
-        "capture_screen":               _execute_capture_screen,
-        "ocr_image":                    _execute_ocr_image,
-        "read_visible_context":         _execute_read_visible_context,
-        "diagnose_visible_error":       _execute_diagnose_visible_error,
-        "review_visible_design":        _execute_review_visible_design,
-        "generate_prompt_from_screen":  _execute_generate_prompt_from_screen,
-        "verify_visible_result":        _execute_verify_visible_result,
+        "capture_screen": _execute_capture_screen,
+        "ocr_image": _execute_ocr_image,
+        "read_visible_context": _execute_read_visible_context,
+        "diagnose_visible_error": _execute_diagnose_visible_error,
+        "review_visible_design": _execute_review_visible_design,
+        "generate_prompt_from_screen": _execute_generate_prompt_from_screen,
+        "verify_visible_result": _execute_verify_visible_result,
     }
 
     fn = dispatch.get(action_type)
@@ -184,12 +185,14 @@ def _execute_action(action: dict[str, Any]) -> dict | None:
 
 # ─── Action executors ─────────────────────────────────────────────────────────
 
+
 def _execute_update_project_summary(params: dict[str, Any]) -> dict | None:
     project_id = params.get("project_id")
     if not project_id:
         return None
     try:
         import agent_actions as _aa
+
         result = _aa.generate_project_summary(project_id)
         return result if result and result.get("summary") else None
     except Exception as exc:
@@ -199,6 +202,7 @@ def _execute_update_project_summary(params: dict[str, Any]) -> dict | None:
 
 def _build_brief_payload(project_id: str) -> dict[str, Any] | None:
     from db import client as _db
+
     commits = _db.get_commits(project_id, limit=20) or []
     file_edits = _db.get_file_edits(project_id, limit=5) or []
     todos = _db.get_todos(project_id, status="pending") or []
@@ -232,6 +236,7 @@ def _execute_regenerate_daily_brief(params: dict[str, Any]) -> dict | None:
     if payload is None:
         return None
     import db.client as _db
+
     success = _db.upsert_daily_brief(
         project_id=project_id,
         brief_date=str(payload.get("brief_date", datetime.now().strftime("%Y-%m-%d"))),
@@ -248,6 +253,7 @@ def _execute_flag_related_todos(params: dict[str, Any]) -> dict | None:
         return None
     try:
         import db.client as _db
+
         todos = _db.get_todos(project_id, status="pending")
         if not todos:
             return {"flagged": 0}
@@ -271,6 +277,7 @@ def _execute_store_session_summary(params: dict[str, Any]) -> dict | None:
     if not project_id or not session_id or not summary:
         return None
     import db.client as _db
+
     success = _db.end_session(project_id, session_id, summary=summary)
     return {"stored": success} if success else None
 
@@ -281,6 +288,7 @@ def _execute_suggest_next_task(params: dict[str, Any]) -> dict | None:
         return None
     try:
         import db.client as _db
+
         todos = _db.get_todos(project_id, status="pending") or []
         if todos:
             top = todos[0]
@@ -300,10 +308,12 @@ def _execute_chat_explain_repo(params: dict[str, Any]) -> dict | None:
         return None
     try:
         import agent_actions as _aa
+
         repo_path = params.get("repo_path", "")
         if not repo_path:
             try:
                 from db.client import get_project
+
                 project = get_project(project_id)
                 if project:
                     repo_path = project.get("repo_path", "")
@@ -324,6 +334,7 @@ def _execute_chat_continue_work(params: dict[str, Any]) -> dict | None:
         return None
     try:
         import agent_actions as _aa
+
         return _aa.continue_previous_work(project_id)
     except Exception as exc:
         logger.warning("plan: chat_continue_work failed | %s", exc)
@@ -336,6 +347,7 @@ def _execute_chat_generate_commit_message(params: dict[str, Any]) -> dict | None
         return None
     try:
         import agent_actions as _aa
+
         result = _aa.generate_commit_message(
             project_id,
             repo_path=params.get("repo_path", ""),
@@ -353,6 +365,7 @@ def _execute_chat_open_browser(params: dict[str, Any]) -> dict | None:
         return {"success": False, "message": "No URL or target provided."}
     try:
         import agent_actions as _aa
+
         return _aa.open_app_or_url(target)
     except Exception as exc:
         logger.warning("plan: chat_open_browser failed | %s", exc)
@@ -365,6 +378,7 @@ def _execute_chat_open_app(params: dict[str, Any]) -> dict | None:
         return {"success": False, "message": "No app name provided."}
     try:
         import agent_actions as _aa
+
         return _aa.open_app_or_url(target)
     except Exception as exc:
         logger.warning("plan: chat_open_app failed | %s", exc)
@@ -378,6 +392,7 @@ def _execute_chat_system_command(params: dict[str, Any]) -> dict | None:
         return {"success": False, "message": "No command provided."}
     try:
         import agent_actions as _aa
+
         return _aa.execute_system_command(message)
     except Exception as exc:
         logger.warning("plan: chat_system_command failed | %s", exc)
@@ -394,21 +409,28 @@ def _execute_chat_query_memory(params: dict[str, Any]) -> dict | None:
         lowered = question.lower().replace("  ", " ")
 
         # ── Project listing queries ─────────────────────────────────────────────
-        if any(k in lowered for k in [
-            "list all project",
-            "all projects",
-            "which project",
-            "projects am i",
-            "working on",
-            "working o n",
-            "am i working on",
-            "show projects",
-            "my projects",
-        ]):
+        if any(
+            k in lowered
+            for k in [
+                "list all project",
+                "all projects",
+                "which project",
+                "projects am i",
+                "working on",
+                "working o n",
+                "am i working on",
+                "show projects",
+                "my projects",
+            ]
+        ):
             import db.client as _db
+
             projects = _db.get_projects()
             if projects:
-                lines = [f"{p.get('name') or p.get('id')} ({p.get('repo_path', 'no path')})" for p in projects[:20]]
+                lines = [
+                    f"{p.get('name') or p.get('id')} ({p.get('repo_path', 'no path')})"
+                    for p in projects[:20]
+                ]
                 answer = "You have these projects:\n" + "\n".join(f"• {line}" for line in lines)
             else:
                 answer = "No projects found in memory."
@@ -416,10 +438,16 @@ def _execute_chat_query_memory(params: dict[str, Any]) -> dict | None:
 
         from ai.bedrock_client import invoke_reasoning
         from memory.retrieval import retrieve_by_vector, retrieve_recent
+
         memories = []
         if project_id:
             memories.extend(
-                retrieve_by_vector(question, ["commits", "todos", "architecture_notes"], project_id=project_id, top_k=6)
+                retrieve_by_vector(
+                    question,
+                    ["commits", "todos", "architecture_notes"],
+                    project_id=project_id,
+                    top_k=6,
+                )
             )
             if not memories:
                 for table in ("commits", "todos", "file_edits"):
@@ -430,6 +458,7 @@ def _execute_chat_query_memory(params: dict[str, Any]) -> dict | None:
         if project_id:
             try:
                 import agent_actions as _aa
+
                 tastes = _aa.get_developer_tastes(project_id)
                 if tastes.get("available"):
                     taste_prompt = (
@@ -441,8 +470,8 @@ def _execute_chat_query_memory(params: dict[str, Any]) -> dict | None:
 
         answer = invoke_reasoning(
             system_prompt=(
-                taste_prompt +
-                "You are AUTOMATA's Reasoning Engine. Answer using the provided memory "
+                taste_prompt
+                + "You are AUTOMATA's Reasoning Engine. Answer using the provided memory "
                 "context when relevant. If the memory doesn't contain the answer, use "
                 "your general knowledge — do NOT say 'No relevant memory found.' "
                 "Be direct, terse, factual. No chatbot filler, no fabricated details."
@@ -455,7 +484,8 @@ def _execute_chat_query_memory(params: dict[str, Any]) -> dict | None:
             # Fallback: return raw memories as a terse bullet list (no LLM)
             answer = "\n".join(
                 f"- [{m.get('table', 'memory')}] {m.get('content', '')}"
-                for m in memories[:5] if m.get("content")
+                for m in memories[:5]
+                if m.get("content")
             )
         elif not answer:
             answer = (
@@ -478,6 +508,7 @@ def _execute_chat_git_log(params: dict[str, Any]) -> dict | None:
 
     # Try DB-stored commits first
     import db.client as _db
+
     commits = _db.get_commits(project_id, limit=10) or []
 
     # Fall back to live git log if DB has no commits
@@ -492,15 +523,18 @@ def _execute_chat_git_log(params: dict[str, Any]) -> dict | None:
         if repo_path and os.path.isdir(repo_path):
             try:
                 import git
+
                 repo = git.Repo(repo_path)
                 commits = []
                 for c in list(repo.iter_commits(max_count=10)):
-                    commits.append({
-                        "commit_hash": c.hexsha[:8],
-                        "message": c.message.strip().split("\n")[0],
-                        "author": c.author.name or "",
-                        "committed_at": c.committed_datetime.strftime("%Y-%m-%d %H:%M"),
-                    })
+                    commits.append(
+                        {
+                            "commit_hash": c.hexsha[:8],
+                            "message": c.message.strip().split("\n")[0],
+                            "author": c.author.name or "",
+                            "committed_at": c.committed_datetime.strftime("%Y-%m-%d %H:%M"),
+                        }
+                    )
             except Exception as exc:
                 logger.warning("plan: git log fallback failed — %s", exc)
 
@@ -545,6 +579,7 @@ def _execute_chat_generate_prompt(params: dict[str, Any]) -> dict | None:
         return {"answer": "No project selected."}
 
     import db.client as _db
+
     commits = _db.get_commits(project_id, limit=10) or []
     todos = _db.get_todos(project_id, status="pending") or []
     file_edits = _db.get_file_edits(project_id, limit=5) or []
@@ -626,7 +661,11 @@ def _execute_chat_generate_prompt(params: dict[str, Any]) -> dict | None:
 
     prompt_text = "\n".join(parts)
 
-    return {"answer": prompt_text, "prompt": prompt_text, "memories_used": len(commits) + len(todos) + len(arch_notes)}
+    return {
+        "answer": prompt_text,
+        "prompt": prompt_text,
+        "memories_used": len(commits) + len(todos) + len(arch_notes),
+    }
 
 
 def _execute_chat_morning_brief(params: dict[str, Any]) -> dict | None:
@@ -638,6 +677,7 @@ def _execute_chat_morning_brief(params: dict[str, Any]) -> dict | None:
         if payload is None:
             return None
         import db.client as _db
+
         success = _db.upsert_daily_brief(
             project_id=project_id,
             brief_date=str(payload.get("brief_date", datetime.now().strftime("%Y-%m-%d"))),
@@ -648,9 +688,15 @@ def _execute_chat_morning_brief(params: dict[str, Any]) -> dict | None:
 
         # Generate a grounded morning brief from the template
         try:
-            from ai.bedrock_client import invoke_reasoning, _load_prompt_template
+            from ai.bedrock_client import _load_prompt_template, invoke_reasoning
             from memory.retrieval import retrieve_by_vector
-            memories = retrieve_by_vector("morning brief recent activity", ["commits", "todos", "file_edits"], project_id=project_id, top_k=6)
+
+            memories = retrieve_by_vector(
+                "morning brief recent activity",
+                ["commits", "todos", "file_edits"],
+                project_id=project_id,
+                top_k=6,
+            )
             highlights = payload.get("highlights", []) or ["No recent activity"]
             pending = payload.get("pending_items", []) or []
             template = _load_prompt_template("morning_brief")
@@ -683,6 +729,7 @@ def _execute_chat_run_tests(params: dict[str, Any]) -> dict | None:
         return {"suggested_command": "pytest", "message": "Run pytest to execute tests."}
     try:
         import agent_actions as _aa
+
         return _aa.run_tests_action(project_id)
     except Exception as exc:
         logger.warning("plan: chat_run_tests failed | %s", exc)
@@ -696,6 +743,7 @@ def _execute_restore_workspace(params: dict[str, Any]) -> dict | None:
         return {"success": False, "message": "No project_id provided."}
     try:
         from automation.restore import restore_workspace as _restore
+
         result = _restore(project_id)
         return {
             "success": result.get("overall") in ("ok", "partial"),
@@ -717,6 +765,7 @@ def _execute_copy_to_clipboard(params: dict[str, Any]) -> dict | None:
         return {"success": False, "error": "text is required"}
     try:
         from automation.os_windows import copy_to_clipboard
+
         ok = copy_to_clipboard(text)
         return {"success": ok, "copied": ok}
     except Exception as exc:
@@ -727,6 +776,7 @@ def _execute_copy_to_clipboard(params: dict[str, Any]) -> dict | None:
 def _execute_paste_clipboard(params: dict[str, Any]) -> dict | None:
     try:
         from automation.os_windows import paste_clipboard
+
         ok = paste_clipboard()
         return {"success": ok, "pasted": ok, "keystrokes": "ctrl+v"}
     except Exception as exc:
@@ -740,6 +790,7 @@ def _execute_open_url(params: dict[str, Any]) -> dict | None:
         return {"success": False, "error": "url is required"}
     try:
         from automation.os_windows import launch_browser
+
         ok = launch_browser(url)
         return {"success": ok, "opened": ok, "url": url}
     except Exception as exc:
@@ -753,6 +804,7 @@ def _execute_focus_app(params: dict[str, Any]) -> dict | None:
         return {"success": False, "error": "app_name is required"}
     try:
         from automation.os_windows import focus_app
+
         ok = focus_app(app_name)
         return {"success": ok, "focused": ok, "app": app_name}
     except Exception as exc:
@@ -766,6 +818,7 @@ def _execute_send_keystroke(params: dict[str, Any]) -> dict | None:
         return {"success": False, "error": "keystrokes is required"}
     try:
         from automation.os_windows import send_keystrokes
+
         ok = send_keystrokes(keystrokes)
         return {"success": ok, "sent": ok, "keystrokes": keystrokes}
     except Exception as exc:
@@ -781,7 +834,15 @@ def _execute_submit_prompt_to_app(params: dict[str, Any]) -> dict | None:
         return {"success": False, "error": "prompt is required"}
     try:
         import time
-        from automation.os_windows import copy_to_clipboard, focus_app, launch_browser, launch_app, send_keystrokes
+
+        from automation.os_windows import (
+            copy_to_clipboard,
+            focus_app,
+            launch_app,
+            launch_browser,
+            send_keystrokes,
+        )
+
         steps: list[dict[str, Any]] = []
         copy_ok = copy_to_clipboard(prompt_text)
         steps.append({"action": "copy_to_clipboard", "success": copy_ok})
@@ -824,6 +885,7 @@ def _execute_verify_result(params: dict[str, Any]) -> dict | None:
                 result["exists"] = False
         elif check_type == "clipboard_has_content":
             from automation.os_windows import read_clipboard
+
             content = read_clipboard()
             result["verified"] = bool(content)
             result["content_preview"] = content[:200] if content else ""
@@ -843,6 +905,7 @@ def _execute_capture_screen(params: dict[str, Any]) -> dict | None:
     region = params.get("region")
     try:
         from automation.os_windows import capture_screen
+
         path = capture_screen(region)
         return {"success": bool(path), "path": path}
     except Exception as exc:
@@ -856,6 +919,7 @@ def _execute_ocr_image(params: dict[str, Any]) -> dict | None:
         return {"success": False, "error": "image_path is required"}
     try:
         from automation.ocr import ocr_image
+
         text = ocr_image(image_path)
         return {"success": bool(text), "text": text}
     except Exception as exc:
@@ -865,8 +929,9 @@ def _execute_ocr_image(params: dict[str, Any]) -> dict | None:
 
 def _execute_read_visible_context(params: dict[str, Any]) -> dict | None:
     try:
-        from automation.screen_capture import capture_screen
         from automation.ocr import ocr_image
+        from automation.screen_capture import capture_screen
+
         screen_path = capture_screen()
         if not screen_path:
             return {"success": False, "error": "screen capture failed"}
@@ -879,8 +944,9 @@ def _execute_read_visible_context(params: dict[str, Any]) -> dict | None:
 
 def _execute_diagnose_visible_error(params: dict[str, Any]) -> dict | None:
     try:
-        from automation.screen_capture import capture_screen
         from automation.ocr import ocr_image
+        from automation.screen_capture import capture_screen
+
         screen_path = capture_screen()
         if not screen_path:
             return {"success": False, "error": "screen capture failed"}
@@ -893,8 +959,9 @@ def _execute_diagnose_visible_error(params: dict[str, Any]) -> dict | None:
 
 def _execute_review_visible_design(params: dict[str, Any]) -> dict | None:
     try:
-        from automation.screen_capture import capture_screen
         from automation.ocr import ocr_image
+        from automation.screen_capture import capture_screen
+
         screen_path = capture_screen()
         if not screen_path:
             return {"success": False, "error": "screen capture failed"}
@@ -907,13 +974,19 @@ def _execute_review_visible_design(params: dict[str, Any]) -> dict | None:
 
 def _execute_generate_prompt_from_screen(params: dict[str, Any]) -> dict | None:
     try:
-        from automation.screen_capture import capture_screen
         from automation.ocr import ocr_image
+        from automation.screen_capture import capture_screen
+
         screen_path = capture_screen()
         if not screen_path:
             return {"success": False, "error": "screen capture failed"}
         text = ocr_image(screen_path)
-        return {"success": bool(text), "text": text, "screen_path": screen_path, "prompt_generated": True}
+        return {
+            "success": bool(text),
+            "text": text,
+            "screen_path": screen_path,
+            "prompt_generated": True,
+        }
     except Exception as exc:
         logger.warning("plan: generate_prompt_from_screen failed | %s", exc)
         return {"success": False, "error": str(exc)}
@@ -921,8 +994,9 @@ def _execute_generate_prompt_from_screen(params: dict[str, Any]) -> dict | None:
 
 def _execute_verify_visible_result(params: dict[str, Any]) -> dict | None:
     try:
-        from automation.screen_capture import capture_screen
         from automation.ocr import ocr_image
+        from automation.screen_capture import capture_screen
+
         screen_path = capture_screen()
         if not screen_path:
             return {"success": False, "error": "screen capture failed"}
@@ -931,7 +1005,8 @@ def _execute_verify_visible_result(params: dict[str, Any]) -> dict | None:
     except Exception as exc:
         logger.warning("plan: verify_visible_result failed | %s", exc)
         return {"success": False, "error": str(exc)}
- 
+
+
 # ─── Trigger → action mapping ─────────────────────────────────────────────────
 
 # Phrases that signal a secondary content-generation request after "and"
@@ -962,7 +1037,7 @@ def _get_actions_for_trigger(trigger: str, context: dict[str, Any]) -> list[dict
                 "type": "update_project_summary",
                 "policy": ACTION_POLICY["update_project_summary"],
                 "params": {"project_id": project_id, "commit_hash": context.get("commit_hash")},
-                "provenance": f"Auto-executed: commit {str(context.get('commit_hash',''))[:8]} detected",
+                "provenance": f"Auto-executed: commit {str(context.get('commit_hash', ''))[:8]} detected",
             },
             {
                 "type": "regenerate_daily_brief",
@@ -973,7 +1048,10 @@ def _get_actions_for_trigger(trigger: str, context: dict[str, Any]) -> list[dict
             {
                 "type": "flag_related_todos",
                 "policy": ACTION_POLICY["flag_related_todos"],
-                "params": {"project_id": project_id, "commit_message": context.get("commit_message", "")},
+                "params": {
+                    "project_id": project_id,
+                    "commit_message": context.get("commit_message", ""),
+                },
                 "provenance": "Auto-executed: related TODOs flagged based on commit message",
             },
         ]
@@ -1001,103 +1079,192 @@ def _get_actions_for_trigger(trigger: str, context: dict[str, Any]) -> list[dict
         ]
 
     if trigger == "chat:resume_project":
-        return [{"type": "restore_workspace", "policy": ACTION_POLICY["restore_workspace"],
-                 "params": {"project_id": project_id, "message": message},
-                 "provenance": f"Suggested: restore workspace — {message}"}]
+        return [
+            {
+                "type": "restore_workspace",
+                "policy": ACTION_POLICY["restore_workspace"],
+                "params": {"project_id": project_id, "message": message},
+                "provenance": f"Suggested: restore workspace — {message}",
+            }
+        ]
 
     if trigger == "chat:continue_work":
-        return [{"type": "chat_continue_work", "policy": ACTION_POLICY["chat_continue_work"],
-                 "params": {"project_id": project_id, "message": message},
-                 "provenance": f"Executed: continue previous work — {message}"}]
+        return [
+            {
+                "type": "chat_continue_work",
+                "policy": ACTION_POLICY["chat_continue_work"],
+                "params": {"project_id": project_id, "message": message},
+                "provenance": f"Executed: continue previous work — {message}",
+            }
+        ]
 
     if trigger == "chat:run_tests":
-        return [{"type": "chat_run_tests", "policy": ACTION_POLICY["chat_run_tests"],
-                 "params": {"project_id": project_id, "message": message},
-                 "provenance": f"Suggested: run tests — {message}"}]
+        return [
+            {
+                "type": "chat_run_tests",
+                "policy": ACTION_POLICY["chat_run_tests"],
+                "params": {"project_id": project_id, "message": message},
+                "provenance": f"Suggested: run tests — {message}",
+            }
+        ]
 
     if trigger == "chat:explain_repo":
-        return [{"type": "chat_explain_repo", "policy": ACTION_POLICY["chat_explain_repo"],
-                 "params": {"project_id": project_id, "message": message, "repo_path": parsed.get("repo_path", "")},
-                 "provenance": f"Executed: explain repository — {message}"}]
+        return [
+            {
+                "type": "chat_explain_repo",
+                "policy": ACTION_POLICY["chat_explain_repo"],
+                "params": {
+                    "project_id": project_id,
+                    "message": message,
+                    "repo_path": parsed.get("repo_path", ""),
+                },
+                "provenance": f"Executed: explain repository — {message}",
+            }
+        ]
 
     if trigger == "chat:generate_commit_message":
-        return [{"type": "chat_generate_commit_message", "policy": ACTION_POLICY["chat_generate_commit_message"],
-                 "params": {"project_id": project_id, "message": message},
-                 "provenance": f"Suggested: generate commit message — {message}"}]
+        return [
+            {
+                "type": "chat_generate_commit_message",
+                "policy": ACTION_POLICY["chat_generate_commit_message"],
+                "params": {"project_id": project_id, "message": message},
+                "provenance": f"Suggested: generate commit message — {message}",
+            }
+        ]
 
     if trigger == "chat:open_browser":
         from agent_actions import _resolve_app_target
+
         _, resolved = _resolve_app_target(target)
-        actions = [{"type": "chat_open_browser", "policy": ACTION_POLICY["chat_open_browser"],
-                     "params": {"project_id": project_id, "target": target, "message": message},
-                     "provenance": f"Executed: opened {resolved}"}]
+        actions = [
+            {
+                "type": "chat_open_browser",
+                "policy": ACTION_POLICY["chat_open_browser"],
+                "params": {"project_id": project_id, "target": target, "message": message},
+                "provenance": f"Executed: opened {resolved}",
+            }
+        ]
         # Compound request: "open X and generate a prompt" — also handle the content generation
         if _detect_secondary_query(message):
-            actions.append({
-                "type": "chat_generate_prompt",
-                "policy": ACTION_POLICY["chat_generate_prompt"],
-                "params": {"project_id": project_id, "message": message, "raw": message},
-                "provenance": f"Executed: generated prompt from compound request — {message}",
-            })
+            actions.append(
+                {
+                    "type": "chat_generate_prompt",
+                    "policy": ACTION_POLICY["chat_generate_prompt"],
+                    "params": {"project_id": project_id, "message": message, "raw": message},
+                    "provenance": f"Executed: generated prompt from compound request — {message}",
+                }
+            )
         return actions
 
     if trigger == "chat:open_app":
         from agent_actions import _resolve_app_target
+
         _, resolved = _resolve_app_target(target)
-        actions = [{"type": "chat_open_app", "policy": ACTION_POLICY["chat_open_app"],
-                     "params": {"project_id": project_id, "target": target, "message": message},
-                     "provenance": f"Executed: launched {resolved}"}]
+        actions = [
+            {
+                "type": "chat_open_app",
+                "policy": ACTION_POLICY["chat_open_app"],
+                "params": {"project_id": project_id, "target": target, "message": message},
+                "provenance": f"Executed: launched {resolved}",
+            }
+        ]
         if _detect_secondary_query(message):
-            actions.append({
-                "type": "chat_generate_prompt",
-                "policy": ACTION_POLICY["chat_generate_prompt"],
-                "params": {"project_id": project_id, "message": message, "raw": message},
-                "provenance": f"Executed: generated prompt from compound request — {message}",
-            })
+            actions.append(
+                {
+                    "type": "chat_generate_prompt",
+                    "policy": ACTION_POLICY["chat_generate_prompt"],
+                    "params": {"project_id": project_id, "message": message, "raw": message},
+                    "provenance": f"Executed: generated prompt from compound request — {message}",
+                }
+            )
         return actions
 
     if trigger == "chat:system_command":
-        return [{"type": "chat_system_command", "policy": ACTION_POLICY["chat_system_command"],
-                 "params": {"project_id": project_id, "message": message, "raw": target},
-                 "provenance": f"Suggested system command — {target}"}]
+        return [
+            {
+                "type": "chat_system_command",
+                "policy": ACTION_POLICY["chat_system_command"],
+                "params": {"project_id": project_id, "message": message, "raw": target},
+                "provenance": f"Suggested system command — {target}",
+            }
+        ]
 
     if trigger == "chat:query_memory":
-        return [{"type": "chat_query_memory", "policy": ACTION_POLICY["chat_query_memory"],
-                 "params": {"project_id": project_id, "question": message, "raw": message,
-                            "reasoning_mode": context.get("reasoning_mode")},
-                 "provenance": f"Executed: queried project memory — {message}"}]
+        return [
+            {
+                "type": "chat_query_memory",
+                "policy": ACTION_POLICY["chat_query_memory"],
+                "params": {
+                    "project_id": project_id,
+                    "question": message,
+                    "raw": message,
+                    "reasoning_mode": context.get("reasoning_mode"),
+                },
+                "provenance": f"Executed: queried project memory — {message}",
+            }
+        ]
 
     if trigger == "chat:git_log":
-        return [{"type": "chat_git_log", "policy": ACTION_POLICY["chat_git_log"],
-                 "params": {"project_id": project_id, "question": message, "raw": message},
-                 "provenance": f"Executed: queried git history — {message}"}]
+        return [
+            {
+                "type": "chat_git_log",
+                "policy": ACTION_POLICY["chat_git_log"],
+                "params": {"project_id": project_id, "question": message, "raw": message},
+                "provenance": f"Executed: queried git history — {message}",
+            }
+        ]
 
     if trigger == "chat:morning_brief":
-        return [{"type": "chat_morning_brief", "policy": ACTION_POLICY["chat_morning_brief"],
-                 "params": {"project_id": project_id},
-                 "provenance": "Executed: generated morning brief from stored memory"}]
+        return [
+            {
+                "type": "chat_morning_brief",
+                "policy": ACTION_POLICY["chat_morning_brief"],
+                "params": {"project_id": project_id},
+                "provenance": "Executed: generated morning brief from stored memory",
+            }
+        ]
 
     # ── Cross-app control triggers ──────────────────────────────────
 
     if trigger == "chat:copy_to_clipboard":
-        return [{"type": "copy_to_clipboard", "policy": ACTION_POLICY["copy_to_clipboard"],
-                 "params": {"project_id": project_id, "text": target},
-                 "provenance": f"Executed: copied text to clipboard"}]
+        return [
+            {
+                "type": "copy_to_clipboard",
+                "policy": ACTION_POLICY["copy_to_clipboard"],
+                "params": {"project_id": project_id, "text": target},
+                "provenance": "Executed: copied text to clipboard",
+            }
+        ]
 
     if trigger == "chat:paste_clipboard":
-        return [{"type": "paste_clipboard", "policy": ACTION_POLICY["paste_clipboard"],
-                 "params": {"project_id": project_id},
-                 "provenance": "Suggested: paste clipboard content into the active app"}]
+        return [
+            {
+                "type": "paste_clipboard",
+                "policy": ACTION_POLICY["paste_clipboard"],
+                "params": {"project_id": project_id},
+                "provenance": "Suggested: paste clipboard content into the active app",
+            }
+        ]
 
     if trigger == "chat:focus_app":
-        return [{"type": "focus_app", "policy": ACTION_POLICY["focus_app"],
-                 "params": {"project_id": project_id, "app_name": target},
-                 "provenance": f"Suggested: focus app — {target}"}]
+        return [
+            {
+                "type": "focus_app",
+                "policy": ACTION_POLICY["focus_app"],
+                "params": {"project_id": project_id, "app_name": target},
+                "provenance": f"Suggested: focus app — {target}",
+            }
+        ]
 
     if trigger == "chat:send_keystroke":
-        return [{"type": "send_keystroke", "policy": ACTION_POLICY["send_keystroke"],
-                 "params": {"project_id": project_id, "keystrokes": target},
-                 "provenance": f"Suggested: send keystroke — {target}"}]
+        return [
+            {
+                "type": "send_keystroke",
+                "policy": ACTION_POLICY["send_keystroke"],
+                "params": {"project_id": project_id, "keystrokes": target},
+                "provenance": f"Suggested: send keystroke — {target}",
+            }
+        ]
 
     if trigger == "chat:submit_prompt":
         from agent_actions import _resolve_app_target
@@ -1119,16 +1286,24 @@ def _get_actions_for_trigger(trigger: str, context: dict[str, Any]) -> list[dict
         # If no explicit prompt text, try to generate one using the reasoning engine
         if not prompt_text:
             has_llm = (
-                any(getattr(settings, k, "") for k in (
-                    "groq_api_key", "gemini_api_key", "nvidia_api_key",
-                    "minimax_api_key", "openrouter_api_key", "cohere_api_key",
-                    "api_key",
-                ))
+                any(
+                    getattr(settings, k, "")
+                    for k in (
+                        "groq_api_key",
+                        "gemini_api_key",
+                        "nvidia_api_key",
+                        "minimax_api_key",
+                        "openrouter_api_key",
+                        "cohere_api_key",
+                        "api_key",
+                    )
+                )
                 or settings.bedrock_available
             )
             if has_llm:
                 try:
                     from agent_actions import generate_prompt_for_app
+
                     generated = generate_prompt_for_app(message, url or app_name, project_id)
                     if generated:
                         prompt_text = generated
@@ -1138,56 +1313,105 @@ def _get_actions_for_trigger(trigger: str, context: dict[str, Any]) -> list[dict
             if not prompt_text:
                 prompt_text = target_str
 
-        return [{"type": "submit_prompt_to_app", "policy": ACTION_POLICY["submit_prompt_to_app"],
-                 "params": {
-                     "project_id": project_id,
-                     "prompt": prompt_text,
-                     "app_name": app_name,
-                     "url": url,
-                 },
-                 "provenance": f"Submit prompt to {url or app_name}"}]
+        return [
+            {
+                "type": "submit_prompt_to_app",
+                "policy": ACTION_POLICY["submit_prompt_to_app"],
+                "params": {
+                    "project_id": project_id,
+                    "prompt": prompt_text,
+                    "app_name": app_name,
+                    "url": url,
+                },
+                "provenance": f"Submit prompt to {url or app_name}",
+            }
+        ]
 
     if trigger == "chat:verify_result":
-        return [{"type": "verify_result", "policy": ACTION_POLICY["verify_result"],
-                 "params": {"project_id": project_id, "type": "clipboard_has_content", "target": target},
-                 "provenance": f"Executed: verified result — {target}"}]
+        return [
+            {
+                "type": "verify_result",
+                "policy": ACTION_POLICY["verify_result"],
+                "params": {
+                    "project_id": project_id,
+                    "type": "clipboard_has_content",
+                    "target": target,
+                },
+                "provenance": f"Executed: verified result — {target}",
+            }
+        ]
 
     # ── Visual feedback triggers ────────────────────────────────────
 
     if trigger == "chat:capture_screen":
-        return [{"type": "capture_screen", "policy": ACTION_POLICY["capture_screen"],
-                 "params": {"project_id": project_id, "region": parsed.get("region", "")},
-                 "provenance": "Suggested: capture screen"}]
+        return [
+            {
+                "type": "capture_screen",
+                "policy": ACTION_POLICY["capture_screen"],
+                "params": {"project_id": project_id, "region": parsed.get("region", "")},
+                "provenance": "Suggested: capture screen",
+            }
+        ]
 
     if trigger == "chat:ocr_image":
-        return [{"type": "ocr_image", "policy": ACTION_POLICY["ocr_image"],
-                 "params": {"project_id": project_id, "image_path": target},
-                 "provenance": f"Executed: OCR on image — {target}"}]
+        return [
+            {
+                "type": "ocr_image",
+                "policy": ACTION_POLICY["ocr_image"],
+                "params": {"project_id": project_id, "image_path": target},
+                "provenance": f"Executed: OCR on image — {target}",
+            }
+        ]
 
     if trigger == "chat:read_visible_context":
-        return [{"type": "read_visible_context", "policy": ACTION_POLICY["read_visible_context"],
-                 "params": {"project_id": project_id},
-                 "provenance": "Suggested: read visible context from screen"}]
+        return [
+            {
+                "type": "read_visible_context",
+                "policy": ACTION_POLICY["read_visible_context"],
+                "params": {"project_id": project_id},
+                "provenance": "Suggested: read visible context from screen",
+            }
+        ]
 
     if trigger == "chat:diagnose_visible_error":
-        return [{"type": "diagnose_visible_error", "policy": ACTION_POLICY["diagnose_visible_error"],
-                 "params": {"project_id": project_id},
-                 "provenance": "Suggested: diagnose visible error on screen"}]
+        return [
+            {
+                "type": "diagnose_visible_error",
+                "policy": ACTION_POLICY["diagnose_visible_error"],
+                "params": {"project_id": project_id},
+                "provenance": "Suggested: diagnose visible error on screen",
+            }
+        ]
 
     if trigger == "chat:review_visible_design":
-        return [{"type": "review_visible_design", "policy": ACTION_POLICY["review_visible_design"],
-                 "params": {"project_id": project_id},
-                 "provenance": "Suggested: review visible design on screen"}]
+        return [
+            {
+                "type": "review_visible_design",
+                "policy": ACTION_POLICY["review_visible_design"],
+                "params": {"project_id": project_id},
+                "provenance": "Suggested: review visible design on screen",
+            }
+        ]
 
     if trigger == "chat:generate_prompt_from_screen":
-        return [{"type": "generate_prompt_from_screen", "policy": ACTION_POLICY["generate_prompt_from_screen"],
-                 "params": {"project_id": project_id},
-                 "provenance": "Executed: generated prompt from screen content"}]
+        return [
+            {
+                "type": "generate_prompt_from_screen",
+                "policy": ACTION_POLICY["generate_prompt_from_screen"],
+                "params": {"project_id": project_id},
+                "provenance": "Executed: generated prompt from screen content",
+            }
+        ]
 
     if trigger == "chat:verify_visible_result":
-        return [{"type": "verify_visible_result", "policy": ACTION_POLICY["verify_visible_result"],
-                 "params": {"project_id": project_id},
-                 "provenance": "Executed: verified visible result on screen"}]
+        return [
+            {
+                "type": "verify_visible_result",
+                "policy": ACTION_POLICY["verify_visible_result"],
+                "params": {"project_id": project_id},
+                "provenance": "Executed: verified visible result on screen",
+            }
+        ]
 
     return []
 
@@ -1195,9 +1419,15 @@ def _get_actions_for_trigger(trigger: str, context: dict[str, Any]) -> list[dict
 def _build_reply(trigger: str, actions: list[dict[str, Any]], context: dict[str, Any]) -> str:
     """Build a meaningful human-readable reply from action results."""
     executed = [a for a in actions if a.get("executed") and a.get("result")]
-    suggested = [a for a in actions if not a.get("executed") and a.get("policy") in ("suggest", "confirm_once", "require_approval")]
+    suggested = [
+        a
+        for a in actions
+        if not a.get("executed")
+        and a.get("policy") in ("suggest", "confirm_once", "require_approval")
+    ]
     failed = [
-        a for a in actions
+        a
+        for a in actions
         if not a.get("executed")
         and a.get("policy") == "auto_execute"
         and (a.get("result") or {}).get("success") is False
@@ -1340,7 +1570,9 @@ def _build_reply(trigger: str, actions: list[dict[str, Any]], context: dict[str,
                 lines.append(f"Submitted {prompt_length}-char prompt to the target app.")
             else:
                 failed_steps = [s for s in steps if not s.get("success")]
-                lines.append(f"Prompt submission partially failed: {len(failed_steps)} step(s) did not complete.")
+                lines.append(
+                    f"Prompt submission partially failed: {len(failed_steps)} step(s) did not complete."
+                )
 
         elif atype == "verify_result":
             verified = result.get("verified")
@@ -1390,7 +1622,9 @@ def _build_reply(trigger: str, actions: list[dict[str, Any]], context: dict[str,
         elif atype == "generate_prompt_from_screen":
             text = result.get("text", "")
             if text:
-                lines.append(f"Prompt generated from screen content ({len(text)} chars):\n{text[:500]}")
+                lines.append(
+                    f"Prompt generated from screen content ({len(text)} chars):\n{text[:500]}"
+                )
             else:
                 lines.append("Could not generate prompt from screen.")
 
@@ -1414,17 +1648,23 @@ def _build_reply(trigger: str, actions: list[dict[str, Any]], context: dict[str,
         if atype == "chat_run_tests":
             cmd = result.get("suggested_command", "pytest")
             repo = result.get("repo_path", "")
-            lines.append(f"**Run tests:** `{cmd}`{f' in `{repo}`' if repo else ''}\n*(Confirm to execute)*")
+            lines.append(
+                f"**Run tests:** `{cmd}`{f' in `{repo}`' if repo else ''}\n*(Confirm to execute)*"
+            )
 
         elif atype == "chat_generate_commit_message":
             msg = result.get("commit_message") if result else None
             if msg:
                 lines.append(f"**Suggested commit message:**\n```\n{msg}\n```")
             else:
-                lines.append("Ready to generate a commit message — stage your changes first, then confirm.")
+                lines.append(
+                    "Ready to generate a commit message — stage your changes first, then confirm."
+                )
 
         elif atype == "restore_workspace":
-            lines.append("**Restore workspace?** This will check out the active branch and start your dev servers. Confirm to proceed.")
+            lines.append(
+                "**Restore workspace?** This will check out the active branch and start your dev servers. Confirm to proceed."
+            )
 
         elif atype in ("chat_open_app", "chat_open_browser"):
             msg = result.get("message", "")
@@ -1434,30 +1674,44 @@ def _build_reply(trigger: str, actions: list[dict[str, Any]], context: dict[str,
                 lines.append(f"  • {opt.get('name', 'unknown')} → `{opt.get('target', '')}`")
 
         elif atype == "paste_clipboard":
-            lines.append("**Paste clipboard?** This will paste into the active app. Confirm to proceed.")
+            lines.append(
+                "**Paste clipboard?** This will paste into the active app. Confirm to proceed."
+            )
 
         elif atype == "focus_app":
             app = result.get("app", "")
-            lines.append(f"**Focus app?** This will bring {app} to the foreground. Confirm to proceed.")
+            lines.append(
+                f"**Focus app?** This will bring {app} to the foreground. Confirm to proceed."
+            )
 
         elif atype == "send_keystroke":
             ks = result.get("keystrokes", "")
-            lines.append(f"**Send keystroke?** This will send {ks} to the active app. Confirm to proceed.")
+            lines.append(
+                f"**Send keystroke?** This will send {ks} to the active app. Confirm to proceed."
+            )
 
         elif atype == "capture_screen":
             lines.append("**Capture screen?** This will take a screenshot. Confirm to proceed.")
 
         elif atype == "read_visible_context":
-            lines.append("**Read visible context?** This will capture and OCR the screen. Confirm to proceed.")
+            lines.append(
+                "**Read visible context?** This will capture and OCR the screen. Confirm to proceed."
+            )
 
         elif atype == "diagnose_visible_error":
-            lines.append("**Diagnose visible error?** This will capture the screen and parse the error. Confirm to proceed.")
+            lines.append(
+                "**Diagnose visible error?** This will capture the screen and parse the error. Confirm to proceed."
+            )
 
         elif atype == "review_visible_design":
-            lines.append("**Review visible design?** This will capture the screen and analyze the design. Confirm to proceed.")
+            lines.append(
+                "**Review visible design?** This will capture the screen and analyze the design. Confirm to proceed."
+            )
 
         elif policy == "require_approval":
-            lines.append(f"**Requires approval:** {atype} — this action will interact with an external service. Confirm to proceed.")
+            lines.append(
+                f"**Requires approval:** {atype} — this action will interact with an external service. Confirm to proceed."
+            )
 
         else:
             lines.append(f"**{atype}** — confirm to proceed.")
@@ -1484,7 +1738,9 @@ def _log_plan(trigger: str, actions: list[dict[str, Any]]) -> None:
 # complex goals (from triggers or the chat endpoint).
 
 
-def orchestrate(goal: str, project_id: str | None = None, context: dict[str, Any] | None = None) -> dict[str, Any]:
+def orchestrate(
+    goal: str, project_id: str | None = None, context: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """
     Run the multi-step agent orchestration loop for a complex goal.
 
@@ -1509,23 +1765,30 @@ def orchestrate(goal: str, project_id: str | None = None, context: dict[str, Any
     actions: list[dict[str, Any]] = []
     for step in orch_result.steps:
         obs = step.observation
-        policy = "suggest" if (not step.success and step.observation.get("suggested")) else "auto_execute"
-        actions.append({
-            "type": step.tool,
-            "policy": policy,
-            "params": step.params,
-            "provenance": f"Step {step.step_index + 1}: {step.tool}",
-            "executed": step.success,
-            "executed_at": None,
-            "result": {
-                "success": step.success,
-                "observation": obs,
-            },
-        })
+        policy = (
+            "suggest"
+            if (not step.success and step.observation.get("suggested"))
+            else "auto_execute"
+        )
+        actions.append(
+            {
+                "type": step.tool,
+                "policy": policy,
+                "params": step.params,
+                "provenance": f"Step {step.step_index + 1}: {step.tool}",
+                "executed": step.success,
+                "executed_at": None,
+                "result": {
+                    "success": step.success,
+                    "observation": obs,
+                },
+            }
+        )
 
     return {
         "trigger": "orchestrator",
-        "reply": orch_result.final_response or f"Goal: {goal}. Stopped: {orch_result.stopped_reason}",
+        "reply": orch_result.final_response
+        or f"Goal: {goal}. Stopped: {orch_result.stopped_reason}",
         "actions": actions,
         "success": orch_result.success,
         "needs_approval": orch_result.needs_approval,

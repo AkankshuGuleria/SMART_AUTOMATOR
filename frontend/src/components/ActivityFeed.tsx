@@ -8,10 +8,11 @@
 
 import { useState, useEffect } from "react";
 import { getActivityFeed, type ActivityItem } from "../lib/api";
+import { usePolling } from "../lib/usePolling";
 
 interface ActivityFeedProps {
-  projectId: string;
-  onClearBadge: () => void;
+  projectId?: string;
+  onClearBadge?: () => void;
 }
 
 const KIND_ICONS: Record<string, string> = {
@@ -95,22 +96,29 @@ export default function ActivityFeed({ projectId, onClearBadge }: ActivityFeedPr
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    setItems([]);
     setLoading(true);
     setError(null);
-    getActivityFeed(projectId)
-      .then(({ items }) => {
-        if (!cancelled) setItems(items || []);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load activity");
-        if (!cancelled) setItems([]);
-      })
-      .finally(() => {
-        if (!cancelled) { setLoading(false); onClearBadge(); }
-      });
-    return () => { cancelled = true; };
   }, [projectId]);
+
+  // Refresh every 30 s while visible so new commits/edits appear without a reload.
+  usePolling(async () => {
+    if (!projectId) {
+      setLoading(false);
+      setError("Select a project to see its activity.");
+      return;
+    }
+    try {
+      const { items } = await getActivityFeed(projectId);
+      setItems(items || []);
+      setError(null);
+      onClearBadge?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load activity");
+    } finally {
+      setLoading(false);
+    }
+  }, 30000, [projectId]);
 
   if (loading) {
     return (

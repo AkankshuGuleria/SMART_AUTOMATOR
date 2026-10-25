@@ -21,13 +21,16 @@ logger = logging.getLogger(__name__)
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+
 def _get_project(project_id: str) -> dict | None:
     from db.client import get_project
+
     return get_project(project_id)
 
 
 def _recent_memories(project_id: str) -> list[dict[str, Any]]:
     from memory.retrieval import retrieve_recent
+
     memories: list[dict[str, Any]] = []
     for table in ("commits", "file_edits", "todos", "architecture_notes", "decision_log"):
         try:
@@ -43,6 +46,7 @@ def _invoke_reasoning(
     memories: list[dict[str, Any]],
 ) -> str | None:
     from ai.bedrock_client import invoke_reasoning
+
     return invoke_reasoning(
         system_prompt=system_prompt,
         user_message=user_message,
@@ -104,9 +108,7 @@ _APP_NAME_MAP: dict[str, str] = {
     "discord": "discord",
     "teams": "teams",
     "zoom": "zoom",
-    "teams": "teams",
     "outlook": "outlook",
-    "onenote": "onenote",
     "onenote": "onenote",
     "onenote web": "https://www.onenote.com",
     # Media
@@ -209,14 +211,14 @@ def _resolve_app_target(raw: str) -> tuple[str, str]:
     # Strip leading filler words
     for prefix in ("open ", "run ", "launch ", "start ", "navigate to ", "go to ", "visit "):
         if lowered.startswith(prefix):
-            raw = raw[len(prefix):].strip()
+            raw = raw[len(prefix) :].strip()
             lowered = raw.lower()
             break
 
     # Strip "browser to " prefix for browser intent messages
     for prefix in ("browser to ", "open browser to ", "launch browser to "):
         if lowered.startswith(prefix):
-            raw = raw[len(prefix):].strip()
+            raw = raw[len(prefix) :].strip()
             lowered = raw.lower()
             break
 
@@ -253,7 +255,7 @@ def open_app_or_url(target: str) -> dict[str, Any]:
     the target is ambiguous, ``success`` is ``False`` and ``suggested`` is
     ``True`` so the UI can present the options and ask the user.
     """
-    from automation.os_windows import launch_browser, launch_app
+    from automation.os_windows import launch_app, launch_browser
 
     kind, resolved = _resolve_app_target(target)
 
@@ -273,7 +275,9 @@ def open_app_or_url(target: str) -> dict[str, Any]:
             "action": "open_browser",
             "target": resolved,
             "success": success,
-            "message": f"Opened {resolved} in the default browser." if success else f"Failed to open browser for {resolved}.",
+            "message": f"Opened {resolved} in the default browser."
+            if success
+            else f"Failed to open browser for {resolved}.",
         }
 
     # Exact app match
@@ -344,7 +348,6 @@ def _search_app_candidates(raw: str) -> list[dict[str, str]]:
     return results
 
 
-
 def execute_system_command(message: str) -> dict[str, Any]:
     """Execute a system-level command (install, setup, env vars) with safety checks."""
     from automation.command_executor import CommandExecutor
@@ -360,8 +363,17 @@ def execute_system_command(message: str) -> dict[str, Any]:
 
     # Check if this is a dangerous operation that needs confirmation
     dangerous_patterns = [
-        "install", "uninstall", "remove", "delete", "format", "shutdown",
-        "set env", "set path", "set java", "set variable", "configure system",
+        "install",
+        "uninstall",
+        "remove",
+        "delete",
+        "format",
+        "shutdown",
+        "set env",
+        "set path",
+        "set java",
+        "set variable",
+        "configure system",
     ]
     is_dangerous = any(p in message.lower() for p in dangerous_patterns)
 
@@ -400,53 +412,68 @@ def _parse_system_command(message: str) -> str:
     """Parse a user message to determine the system command to run."""
     lowered = message.lower().strip()
 
-    # Java/JDK installation
-    if any(k in lowered for k in ["java", "jdk", "java install", "jdk install"]):
-        return "winget install Microsoft.JavaRuntime --accept-package-agreements"
+    # Specific install phrases first so bare keywords (e.g. "python", "git",
+    # "node") do not shadow more specific intent in ambiguous messages.
+    install_phrases = [
+        ("java install", "winget install Microsoft.JavaRuntime --accept-package-agreements"),
+        ("jdk install", "winget install Microsoft.JavaRuntime --accept-package-agreements"),
+        ("node install", "winget install OpenJS.NodeJS.LTS --accept-package-agreements"),
+        ("nodejs install", "winget install OpenJS.NodeJS.LTS --accept-package-agreements"),
+        ("python install", "winget install Python.Python.3.12 --accept-package-agreements"),
+        ("python3 install", "winget install Python.Python.3.12 --accept-package-agreements"),
+        ("git install", "winget install Git.Git --accept-package-agreements"),
+        ("docker install", "winget install Docker.DockerDesktop --accept-package-agreements"),
+        (
+            "vs code install",
+            "winget install Microsoft.VisualStudioCode --accept-package-agreements",
+        ),
+        (
+            "visual studio code install",
+            "winget install Microsoft.VisualStudioCode --accept-package-agreements",
+        ),
+        (
+            "idea install",
+            "winget install JetBrains.IntelliJIDEA.Community --accept-package-agreements",
+        ),
+        (
+            "jetbrains install",
+            "winget install JetBrains.IntelliJIDEA.Community --accept-package-agreements",
+        ),
+        ("chrome install", "winget install Google.Chrome --accept-package-agreements"),
+        ("google chrome install", "winget install Google.Chrome --accept-package-agreements"),
+        ("browser install", "winget install Google.Chrome --accept-package-agreements"),
+    ]
+    for phrase, command in install_phrases:
+        if phrase in lowered:
+            return command
 
-    # Node.js installation
-    if any(k in lowered for k in ["node", "node.js", "nodejs", "node install"]):
-        return "winget install OpenJS.NodeJS.LTS --accept-package-agreements"
-
-    # Python installation
-    if any(k in lowered for k in ["python", "python install", "python3"]):
-        return "winget install Python.Python.3.12 --accept-package-agreements"
-
-    # Git installation
-    if any(k in lowered for k in ["git", "git install"]):
-        return "winget install Git.Git --accept-package-agreements"
-
-    # Docker installation
-    if any(k in lowered for k in ["docker", "docker install"]):
-        return "winget install Docker.DockerDesktop --accept-package-agreements"
-
-    # VS Code installation
-    if any(k in lowered for k in ["vscode", "visual studio code", "vs code install"]):
-        return "winget install Microsoft.VisualStudioCode --accept-package-agreements"
-
-    # IntelliJ IDEA installation
-    if any(k in lowered for k in ["intellij", "idea install", "jetbrains"]):
-        return "winget install JetBrains.IntelliJIDEA.Community --accept-package-agreements"
-
-    # Chrome installation
-    if any(k in lowered for k in ["chrome", "google chrome", "browser install"]):
-        return "winget install Google.Chrome --accept-package-agreements"
-
-    # General package manager install
+    # Explicit package-manager commands the user typed take priority.
     if "winget install" in lowered:
         return message.strip()
-
-    # pip install
     if "pip install" in lowered:
         return message.strip()
-
-    # npm install
     if "npm install" in lowered:
         return message.strip()
-
-    # choco install
     if "choco install" in lowered:
         return message.strip()
+
+    # Bare keywords — checked after specific phrases.
+    if any(k in lowered for k in ["java", "jdk"]):
+        return "winget install Microsoft.JavaRuntime --accept-package-agreements"
+    if any(k in lowered for k in ["node", "node.js", "nodejs"]):
+        return "winget install OpenJS.NodeJS.LTS --accept-package-agreements"
+    if any(k in lowered for k in ["python", "python3"]):
+        return "winget install Python.Python.3.12 --accept-package-agreements"
+    if any(k in lowered for k in ["git"]):
+        return "winget install Git.Git --accept-package-agreements"
+    if any(k in lowered for k in ["docker"]):
+        return "winget install Docker.DockerDesktop --accept-package-agreements"
+    if any(k in lowered for k in ["vscode", "visual studio code", "vs code"]):
+        return "winget install Microsoft.VisualStudioCode --accept-package-agreements"
+    if any(k in lowered for k in ["intellij", "idea", "jetbrains"]):
+        return "winget install JetBrains.IntelliJIDEA.Community --accept-package-agreements"
+    if any(k in lowered for k in ["chrome", "google chrome", "browser"]):
+        return "winget install Google.Chrome --accept-package-agreements"
 
     # Environment variable setup
     if any(k in lowered for k in ["set env", "set path", "set java", "set variable"]):
@@ -491,7 +518,19 @@ def run_tests_action(project_id: str, command: str = "") -> dict[str, Any]:
 
 
 def explain_repository(project_id: str, repo_path: str) -> dict[str, Any]:
-    from explain_repository import synthesize_explanation
+    try:
+        from explain_repository import synthesize_explanation
+    except ImportError:
+        return {
+            "project_id": project_id,
+            "repo_path": repo_path,
+            "error": "explain_repository module is not available",
+            "explanation": None,
+            "readme_summary": "",
+            "folder_structure": [],
+            "architecture_notes": [],
+        }
+
     recent = _recent_memories(project_id)
     return synthesize_explanation(project_id, repo_path, recent_memories=recent)
 
@@ -507,6 +546,7 @@ def generate_commit_message(project_id: str, repo_path: str, staged: bool = True
     diff_text = ""
     try:
         import git
+
         repo = git.Repo(repo_path)
         if staged:
             diff_text = repo.git.diff("--cached", "--no-color", "--unified=3")
@@ -526,7 +566,7 @@ def generate_commit_message(project_id: str, repo_path: str, staged: bool = True
 
     memories = _recent_memories(project_id)
     context = "\n".join(
-        f"- [{m.get('table','memory')}] {m.get('content','')}"
+        f"- [{m.get('table', 'memory')}] {m.get('content', '')}"
         for m in memories[:10]
         if m.get("content")
     )
@@ -537,8 +577,7 @@ def generate_commit_message(project_id: str, repo_path: str, staged: bool = True
         "Output ONLY the commit message subject line, no explanation."
     )
     user_message = (
-        f"Recent project memory:\n{context}\n\n"
-        f"Git diff (first 6000 chars):\n{diff_text[:6000]}"
+        f"Recent project memory:\n{context}\n\nGit diff (first 6000 chars):\n{diff_text[:6000]}"
     )
 
     answer = _invoke_reasoning(system_prompt, user_message, memories)
@@ -584,8 +623,15 @@ def find_authentication_code(project_id: str, query: str = "authentication") -> 
                 logger.warning("agent_actions: recent retrieval failed for %s — %s", table, exc)
 
     keywords = [
-        "auth", "jwt", "login", "session", "token", "oauth",
-        "password", "credential", "sso",
+        "auth",
+        "jwt",
+        "login",
+        "session",
+        "token",
+        "oauth",
+        "password",
+        "credential",
+        "sso",
     ]
     scored: list[tuple[float, dict[str, Any]]] = []
     for memory in memories:
@@ -594,9 +640,9 @@ def find_authentication_code(project_id: str, query: str = "authentication") -> 
         text = " ".join([content, raw_path])
         score = memory.get("score", 1.0)
         if any(k in text.lower() for k in keywords):
-            score -= 0.2
+            score += 0.2  # Boost auth-related items so they rank higher
         scored.append((score, memory))
-    scored.sort(key=lambda x: x[0])
+    scored.sort(key=lambda x: x[0], reverse=True)  # Sort descending (higher scores first)
     results = [m for _, m in scored[:10]]
 
     return {
@@ -613,6 +659,7 @@ def continue_previous_work(project_id: str) -> dict[str, Any]:
         return {"error": "Project not found", "suggestion": None}
 
     from db.client import get_active_session, get_todos
+
     session = get_active_session(project_id)
     pending_todos = get_todos(project_id, status="pending")
     recent = _recent_memories(project_id)
@@ -625,14 +672,13 @@ def continue_previous_work(project_id: str) -> dict[str, Any]:
     if pending_todos:
         context_parts.append(
             "Pending TODOs:\n"
-            + "\n".join(f"- {t.get('description','')}" for t in pending_todos[:5])
+            + "\n".join(f"- {t.get('description', '')}" for t in pending_todos[:5])
         )
     if recent:
         context_parts.append(
             "Recent memory:\n"
             + "\n".join(
-                f"- [{m.get('table','memory')}] {m.get('content','')}"
-                for m in recent[:8]
+                f"- [{m.get('table', 'memory')}] {m.get('content', '')}" for m in recent[:8]
             )
         )
 
@@ -662,7 +708,7 @@ def generate_project_summary(project_id: str) -> dict[str, Any]:
 
     recent = _recent_memories(project_id)
     context = "\n".join(
-        f"- [{m.get('table','memory')}] {m.get('content','')}"
+        f"- [{m.get('table', 'memory')}] {m.get('content', '')}"
         for m in recent[:12]
         if m.get("content")
     )
@@ -693,6 +739,7 @@ def start_development_environment(project_id: str) -> dict[str, Any]:
         return {"error": f"Repo path not found: {repo_path}", "steps": []}
 
     from automation.dev_servers import start_dev_servers
+
     result = start_dev_servers(project_id)
     return {
         "project_id": project_id,
@@ -704,6 +751,7 @@ def start_development_environment(project_id: str) -> dict[str, Any]:
 
 
 # ─── Cross-App Task Execution Engine ──────────────────────────────────────────
+
 
 class CrossAppTaskEngine:
     """
@@ -739,12 +787,15 @@ class CrossAppTaskEngine:
             except Exception as exc:
                 logger.error(
                     "cross_app_task: failed | task=%s action=%s error=%s",
-                    task_id, action, exc,
+                    task_id,
+                    action,
+                    exc,
                 )
                 task["error"] = str(exc)
                 task["status"] = "error"
 
         import threading
+
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()
         task["thread"] = thread
@@ -812,7 +863,9 @@ def _dispatch_cross_app_action(action: str, params: dict[str, Any]) -> Any:
             target=str(params.get("target", "")),
         )
     if action in ("open_url", "open_app"):
-        return open_app_or_url(str(params.get("url", params.get("app_name", params.get("target", "")))))
+        return open_app_or_url(
+            str(params.get("url", params.get("app_name", params.get("target", ""))))
+        )
     raise ValueError(f"Unknown cross-app action: {action}")
 
 
@@ -823,22 +876,21 @@ def _build_web_app(params: dict[str, Any]) -> dict[str, Any]:
         return {"status": "error", "detail": f"Invalid project path: {project_path}"}
 
     commands = {
-        "vite": ["npm", "run", "dev"],
-        "next": ["npm", "run", "dev"],
-        "vite_alt": ["npm", "run", "dev"],
+        "vite": "npm run dev",
+        "next": "npm run dev",
+        "vite_alt": "npm run dev",
     }
-    command = commands.get(framework, ["npm", "run", "dev"])
+    command = commands.get(framework, "npm run dev")
     cwd = project_path
 
     try:
-        import subprocess
-        proc = subprocess.Popen(  # noqa: S603
-            command,
-            cwd=cwd,
-            shell=False,
-            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0) if os.name == "nt" else 0,
-        )
-        return {"status": "started", "pid": proc.pid, "command": command, "cwd": cwd}
+        from automation.os_windows import open_terminal_with_command
+
+        pid = open_terminal_with_command(command, cwd)
+        if pid is not None:
+            return {"status": "started", "pid": pid, "command": command, "cwd": cwd}
+        else:
+            return {"status": "error", "detail": "Failed to launch terminal"}
     except Exception as exc:
         logger.error("cross_app: build_web_app failed — %s", exc)
         return {"status": "error", "detail": str(exc)}
@@ -848,19 +900,25 @@ def _execute_os_action(params: dict[str, Any]) -> dict[str, Any]:
     action_type = params.get("type", "")
     if action_type == "open_terminal":
         from automation.os_windows import open_terminal
+
         success = open_terminal(params.get("cwd", ""))
         return {"status": "ok" if success else "error", "detail": "open_terminal"}
     if action_type == "launch_editor":
         from automation.os_windows import launch_editor
+
         success = launch_editor(params.get("path", ""))
         return {"status": "ok" if success else "error", "detail": "launch_editor"}
     if action_type == "run_command":
         command = params.get("command", "")
         cwd = params.get("cwd", "")
         try:
-            import subprocess
-            proc = subprocess.Popen(command, cwd=cwd, shell=True)  # noqa: S602
-            return {"status": "started", "pid": proc.pid}
+            from automation.os_windows import open_terminal_with_command
+
+            pid = open_terminal_with_command(command, cwd)
+            if pid is not None:
+                return {"status": "started", "pid": pid}
+            else:
+                return {"status": "error", "detail": "Failed to launch terminal"}
         except Exception as exc:
             return {"status": "error", "detail": str(exc)}
     return {"status": "error", "detail": f"Unknown OS action: {action_type}"}
@@ -882,6 +940,7 @@ def _drive_git(params: dict[str, Any]) -> dict[str, Any]:
         return {"status": "error", "detail": f"Invalid repo path: {repo_path}"}
     try:
         import git
+
         repo = git.Repo(repo_path)
         if command == "status":
             return {"status": "ok", "output": repo.git.status()}
@@ -899,6 +958,7 @@ def _drive_npm(params: dict[str, Any]) -> dict[str, Any]:
         return {"status": "error", "detail": f"Invalid cwd: {cwd}"}
     try:
         import subprocess
+
         args = ["npm"]
         if command == "install":
             args.extend(["install"])
@@ -914,6 +974,7 @@ def _drive_npm(params: dict[str, Any]) -> dict[str, Any]:
 
 
 # ─── Taste Preferences Pipeline ────────────────────────────────────────────────
+
 
 def analyze_taste_preferences(project_id: str, developer_id: str | None = None) -> dict:
     """
@@ -933,6 +994,7 @@ def analyze_taste_preferences(project_id: str, developer_id: str | None = None) 
 
     try:
         from db.client import get_commits, get_todos, insert_taste_preference
+
         commits = get_commits(project_id, limit=50) or []
         todos = get_todos(project_id, status="pending") or []
     except Exception as exc:
@@ -943,57 +1005,79 @@ def analyze_taste_preferences(project_id: str, developer_id: str | None = None) 
 
     # 1. Naming convention detector
     snake = sum(1 for c in commits if "_" in str(c.get("message", "")))
-    camel = sum(1 for c in commits if any(w in str(c.get("message", "")).lower() for w in ["camel", "js", "ts", "react"]))
+    camel = sum(
+        1
+        for c in commits
+        if any(w in str(c.get("message", "")).lower() for w in ["camel", "js", "ts", "react"])
+    )
     if snake > camel:
-        inferred.append({
-            "category": "naming",
-            "description": "Prefers snake_case naming (observed in commit messages)",
-            "confidence": min(0.95, 0.5 + snake * 0.05),
-            "evidence_count": snake,
-        })
+        inferred.append(
+            {
+                "category": "naming",
+                "description": "Prefers snake_case naming (observed in commit messages)",
+                "confidence": min(0.95, 0.5 + snake * 0.05),
+                "evidence_count": snake,
+            }
+        )
     elif camel > snake:
-        inferred.append({
-            "category": "naming",
-            "description": "Prefers camelCase naming (observed in commit messages and file paths)",
-            "confidence": min(0.95, 0.5 + camel * 0.05),
-            "evidence_count": camel,
-        })
+        inferred.append(
+            {
+                "category": "naming",
+                "description": "Prefers camelCase naming (observed in commit messages and file paths)",
+                "confidence": min(0.95, 0.5 + camel * 0.05),
+                "evidence_count": camel,
+            }
+        )
 
     # 2. Test framework detector
-    test_files = [c.get("message", "") for c in commits if "test" in str(c.get("message", "")).lower()]
+    test_files = [
+        c.get("message", "") for c in commits if "test" in str(c.get("message", "")).lower()
+    ]
     if any("pytest" in m.lower() for m in test_files):
-        inferred.append({
-            "category": "testing",
-            "description": "Uses pytest for testing",
-            "confidence": 0.85,
-            "evidence_count": sum(1 for m in test_files if "pytest" in m.lower()),
-        })
+        inferred.append(
+            {
+                "category": "testing",
+                "description": "Uses pytest for testing",
+                "confidence": 0.85,
+                "evidence_count": sum(1 for m in test_files if "pytest" in m.lower()),
+            }
+        )
     elif any("jest" in m.lower() for m in test_files):
-        inferred.append({
-            "category": "testing",
-            "description": "Uses Jest for testing",
-            "confidence": 0.85,
-            "evidence_count": sum(1 for m in test_files if "jest" in m.lower()),
-        })
+        inferred.append(
+            {
+                "category": "testing",
+                "description": "Uses Jest for testing",
+                "confidence": 0.85,
+                "evidence_count": sum(1 for m in test_files if "jest" in m.lower()),
+            }
+        )
 
     # 3. Commit style detector
-    conventional = sum(1 for c in commits if str(c.get("message", "")).startswith(("feat:", "fix:", "docs:", "chore:", "refactor:")))
+    conventional = sum(
+        1
+        for c in commits
+        if str(c.get("message", "")).startswith(("feat:", "fix:", "docs:", "chore:", "refactor:"))
+    )
     if conventional > len(commits) * 0.5:
-        inferred.append({
-            "category": "commits",
-            "description": "Uses Conventional Commits format",
-            "confidence": min(0.95, 0.5 + conventional * 0.05),
-            "evidence_count": conventional,
-        })
+        inferred.append(
+            {
+                "category": "commits",
+                "description": "Uses Conventional Commits format",
+                "confidence": min(0.95, 0.5 + conventional * 0.05),
+                "evidence_count": conventional,
+            }
+        )
 
     # 4. TODO density -> risk tolerance proxy
     if len(todos) > 10:
-        inferred.append({
-            "category": "risk",
-            "description": "High TODO density — may prefer iterative small changes over big refactors",
-            "confidence": 0.6,
-            "evidence_count": len(todos),
-        })
+        inferred.append(
+            {
+                "category": "risk",
+                "description": "High TODO density — may prefer iterative small changes over big refactors",
+                "confidence": 0.6,
+                "evidence_count": len(todos),
+            }
+        )
 
     # Persist inferred preferences
     saved = 0
@@ -1018,6 +1102,7 @@ def get_developer_tastes(developer_id: str) -> dict:
     """Return a concise taste summary for use in prompts/reasoning."""
     try:
         from db.client import get_taste_preferences
+
         prefs = get_taste_preferences(developer_id)
         if not prefs:
             return {"available": False, "summary": ""}
@@ -1033,11 +1118,13 @@ def get_developer_tastes(developer_id: str) -> dict:
 
 # ─── Decision / Mistake Dogfooding Helpers ─────────────────────────────────────
 
+
 def record_agent_decision(project_id: str, decision: str, rationale: str) -> None:
     """Log an autonomous agent decision to decision_log with embedding for future retrieval."""
     try:
         from db.client import insert_decision
         from memory.embeddings import generate_embedding_for_capture
+
         emb = generate_embedding_for_capture(f"{decision}. {rationale}")
         insert_decision(project_id, decision, rationale, rationale_embedding=emb)
     except Exception as exc:
@@ -1049,8 +1136,11 @@ def record_agent_mistake(project_id: str, symptom: str, root_cause: str, fix: st
     try:
         from db.client import insert_mistake
         from memory.embeddings import generate_embedding_for_capture
+
         emb = generate_embedding_for_capture(f"{symptom}. {root_cause}. {fix}")
-        insert_mistake(project_id, symptom, root_cause, fix, module="decision_engine", root_cause_embedding=emb)
+        insert_mistake(
+            project_id, symptom, root_cause, fix, module="decision_engine", root_cause_embedding=emb
+        )
     except Exception as exc:
         logger.warning("record_agent_mistake failed — %s", exc)
 
@@ -1102,7 +1192,14 @@ def submit_prompt_to_app_action(app_name: str, prompt_text: str, url: str = "") 
     6. Submit (Ctrl+Enter).
     """
     import time
-    from automation.os_windows import copy_to_clipboard, focus_app, launch_browser, launch_app, send_keystrokes
+
+    from automation.os_windows import (
+        copy_to_clipboard,
+        focus_app,
+        launch_app,
+        launch_browser,
+        send_keystrokes,
+    )
 
     steps: list[dict[str, Any]] = []
 
@@ -1130,7 +1227,12 @@ def submit_prompt_to_app_action(app_name: str, prompt_text: str, url: str = "") 
     steps.append({"action": "send_keystroke", "success": submit_ok, "keystrokes": "ctrl+enter"})
 
     all_success = all(s.get("success") for s in steps)
-    return {"success": all_success, "action": "submit_prompt_to_app", "prompt_length": len(prompt_text), "steps": steps}
+    return {
+        "success": all_success,
+        "action": "submit_prompt_to_app",
+        "prompt_length": len(prompt_text),
+        "steps": steps,
+    }
 
 
 def generate_prompt_for_app(
@@ -1176,7 +1278,12 @@ def generate_prompt_for_app(
 
 def verify_result_action(check_type: str, target: str = "") -> dict[str, Any]:
     """Verify whether an action worked: app opened, file changed, prompt copied, etc."""
-    result: dict[str, Any] = {"success": True, "action": "verify_result", "check_type": check_type, "target": target}
+    result: dict[str, Any] = {
+        "success": True,
+        "action": "verify_result",
+        "check_type": check_type,
+        "target": target,
+    }
     if check_type == "file_changed":
         if target and os.path.exists(target):
             result["verified"] = True
@@ -1187,6 +1294,7 @@ def verify_result_action(check_type: str, target: str = "") -> dict[str, Any]:
             result["exists"] = False
     elif check_type == "clipboard_has_content":
         from automation.os_windows import read_clipboard
+
         content = read_clipboard()
         result["verified"] = bool(content)
         result["content_preview"] = content[:200] if content else ""
@@ -1216,59 +1324,108 @@ def ocr_image_action(image_path: str) -> dict[str, Any]:
 
 def read_visible_context_action() -> dict[str, Any]:
     """Capture and OCR the current visible workspace."""
-    from automation.screen_capture import capture_screen
     from automation.ocr import ocr_image
+    from automation.screen_capture import capture_screen
 
     screen_path = capture_screen()
     if not screen_path:
-        return {"success": False, "action": "read_visible_context", "error": "screen capture failed"}
+        return {
+            "success": False,
+            "action": "read_visible_context",
+            "error": "screen capture failed",
+        }
     text = ocr_image(screen_path)
-    return {"success": bool(text), "action": "read_visible_context", "text": text, "screen_path": screen_path}
+    return {
+        "success": bool(text),
+        "action": "read_visible_context",
+        "text": text,
+        "screen_path": screen_path,
+    }
 
 
 def diagnose_visible_error_action() -> dict[str, Any]:
     """Parse visible error text and connect it to project memory."""
-    from automation.screen_capture import capture_screen
     from automation.ocr import ocr_image
+    from automation.screen_capture import capture_screen
 
     screen_path = capture_screen()
     if not screen_path:
-        return {"success": False, "action": "diagnose_visible_error", "error": "screen capture failed"}
+        return {
+            "success": False,
+            "action": "diagnose_visible_error",
+            "error": "screen capture failed",
+        }
     text = ocr_image(screen_path)
-    return {"success": bool(text), "action": "diagnose_visible_error", "text": text, "screen_path": screen_path, "diagnosed": True}
+    return {
+        "success": bool(text),
+        "action": "diagnose_visible_error",
+        "text": text,
+        "screen_path": screen_path,
+        "diagnosed": True,
+    }
 
 
 def review_visible_design_action() -> dict[str, Any]:
     """Analyze current UI/design preview and generate improvement notes."""
-    from automation.screen_capture import capture_screen
     from automation.ocr import ocr_image
+    from automation.screen_capture import capture_screen
 
     screen_path = capture_screen()
     if not screen_path:
-        return {"success": False, "action": "review_visible_design", "error": "screen capture failed"}
+        return {
+            "success": False,
+            "action": "review_visible_design",
+            "error": "screen capture failed",
+        }
     text = ocr_image(screen_path)
-    return {"success": bool(text), "action": "review_visible_design", "text": text, "screen_path": screen_path, "reviewed": True}
+    return {
+        "success": bool(text),
+        "action": "review_visible_design",
+        "text": text,
+        "screen_path": screen_path,
+        "reviewed": True,
+    }
 
 
 def generate_prompt_from_screen_action() -> dict[str, Any]:
     """Use visible context plus project memory to draft a prompt for another tool."""
-    from automation.screen_capture import capture_screen
     from automation.ocr import ocr_image
+    from automation.screen_capture import capture_screen
 
     screen_path = capture_screen()
     if not screen_path:
-        return {"success": False, "action": "generate_prompt_from_screen", "error": "screen capture failed"}
+        return {
+            "success": False,
+            "action": "generate_prompt_from_screen",
+            "error": "screen capture failed",
+        }
     text = ocr_image(screen_path)
-    return {"success": bool(text), "action": "generate_prompt_from_screen", "text": text, "screen_path": screen_path, "prompt_generated": True}
+    return {
+        "success": bool(text),
+        "action": "generate_prompt_from_screen",
+        "text": text,
+        "screen_path": screen_path,
+        "prompt_generated": True,
+    }
 
 
 def verify_visible_result_action() -> dict[str, Any]:
     """Check whether expected UI text/state appears after an action."""
-    from automation.screen_capture import capture_screen
     from automation.ocr import ocr_image
+    from automation.screen_capture import capture_screen
 
     screen_path = capture_screen()
     if not screen_path:
-        return {"success": False, "action": "verify_visible_result", "error": "screen capture failed"}
+        return {
+            "success": False,
+            "action": "verify_visible_result",
+            "error": "screen capture failed",
+        }
     text = ocr_image(screen_path)
-    return {"success": bool(text), "action": "verify_visible_result", "text": text, "screen_path": screen_path, "verified": True}
+    return {
+        "success": bool(text),
+        "action": "verify_visible_result",
+        "text": text,
+        "screen_path": screen_path,
+        "verified": True,
+    }

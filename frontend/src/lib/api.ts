@@ -8,7 +8,14 @@
  */
 
 
+const API_BASE = (import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000").replace(/\/$/, "");
+
 const WS_BASE = () => {
+  if (import.meta.env.VITE_WS_BASE) {
+    return String(import.meta.env.VITE_WS_BASE).replace(/\/$/, "");
+  }
+  if (API_BASE.startsWith("https://")) return API_BASE.replace(/^https:/, "wss:");
+  if (API_BASE.startsWith("http://")) return API_BASE.replace(/^http:/, "ws:");
   if (typeof window !== "undefined") {
     return `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
   }
@@ -40,7 +47,86 @@ export interface MorningBrief {
   highlights: string[];
   pending_items: string[];
   last_edited_file?: string;
+  brief_text?: string;
   generated_at: string;
+}
+
+// ─── System resources & app usage ─────────────────────────────────────────────
+
+export interface GpuDevice {
+  index: number;
+  name: string | null;
+  utilization_percent: number | null;
+  temperature_c: number | null;
+  power_watts: number | null;
+  memory_used_mb: number | null;
+  memory_total_mb: number | null;
+  memory_percent: number | null;
+}
+
+export interface ProcessUsage {
+  name: string;
+  cpu_percent: number;
+  memory_mb: number;
+  count: number;
+}
+
+export interface SystemMetrics {
+  available: boolean;
+  reason?: string;
+  timestamp?: number;
+  cpu?: { percent: number; per_core: number[]; cores_logical: number; cores_physical: number | null; frequency_mhz: number | null };
+  memory?: { percent: number; used_gb: number; total_gb: number; available_gb: number; swap_percent: number };
+  gpu?: { available: boolean; reason: string | null; devices: GpuDevice[] };
+  disk?: { mount: string; used_gb: number | null; total_gb: number | null; percent: number | null; read_bps: number; write_bps: number };
+  network?: { recv_bps: number; sent_bps: number };
+  battery?: { percent: number; plugged_in: boolean } | null;
+  uptime_seconds?: number;
+  history: Array<{ t: number; cpu: number; ram: number; gpu: number | null; vram: number | null }>;
+  processes?: ProcessUsage[];
+}
+
+export type UsageRange = "today" | "week" | "month";
+
+export interface UsageTrackerStatus {
+  supported: boolean;
+  running: boolean;
+  paused: boolean;
+  idle: boolean;
+  current: { app: string; category: string; title: string; since: number } | null;
+  disabled_by_env: boolean;
+  error: string | null;
+  db_path: string | null;
+  idle_threshold_seconds: number;
+}
+
+export interface UsageSummary {
+  range: UsageRange;
+  start: number;
+  end: number;
+  total_seconds: number;
+  focus_percent: number;
+  app_switches: number;
+  longest_session: { app: string; seconds: number; started_at: number } | null;
+  apps: Array<{ app: string; category: string; seconds: number; sessions: number; percent: number; top_title: string }>;
+  categories: Array<{ category: string; seconds: number; percent: number }>;
+  hourly: Array<{ hour: number; seconds: number }>;
+  daily: Array<{ day: string; seconds: number }>;
+  tracking?: UsageTrackerStatus;
+  error?: string;
+}
+
+export interface UsageTimeline {
+  day: string;
+  segments: Array<{ app: string; category: string; title: string; start: number; end: number; seconds: number }>;
+}
+
+export interface AutostartStatus {
+  supported: boolean;
+  enabled: boolean;
+  launcher: string | null;
+  command: string;
+  error?: string;
 }
 
 export interface RestoreStep {
@@ -103,9 +189,11 @@ export interface ActivityItem {
 export interface ActionCard {
   type?: string;
   policy?: string;
+  params?: Record<string, unknown>;
   executed?: boolean;
   executed_at?: string;
   provenance?: string;
+  result?: Record<string, unknown>;
 }
 
 export interface ChatResponse {
@@ -157,11 +245,27 @@ export interface CrossAppTaskResult {
 export interface DecisionEntry {
   id: string;
   project_id: string;
-  trigger: string;
-  action_type: string;
-  executed: boolean;
-  suggested: boolean;
+  decision: string;
+  rationale: string;
+  decided_at: string;
+}
+
+export interface Todo {
+  id: string;
+  project_id: string;
+  description: string;
+  status: string;
+  source: string;
   created_at: string;
+  resolved_at: string | null;
+}
+
+export interface Session {
+  id: string;
+  project_id: string;
+  started_at: string;
+  ended_at: string | null;
+  summary: string | null;
 }
 
 export interface EndSessionResult {
@@ -174,7 +278,8 @@ export interface EndSessionResult {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  const target = url.startsWith("http") ? url : `${API_BASE}${url}`;
+  const res = await fetch(target, {
     headers: {
       "Content-Type": "application/json",
       ...(init?.headers || {}),
@@ -184,10 +289,77 @@ async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Request failed: ${res.status} ${res.statusText}${text ? ` - ${text}` : ""}`);
+    let detail = "";
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown };
+      if (typeof parsed.detail === "string") detail = parsed.detail;
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(detail || `Request failed: ${res.status} ${res.statusText}${text ? ` - ${text}` : ""}`);
   }
 
   return res.json() as Promise<T>;
+}
+
+export interface AnalyticsData {
+  project_id: string;
+  commits_over_time: Array<{ day: string; count: number }>;
+  file_edits_over_time: Array<{ day: string; count: number }>;
+  todo_stats: { pending: number; completed: number; total: number };
+  session_stats: { total_sessions: number; total_time_seconds: number };
+  top_files: Array<{ file_path: string; edit_count: number }>;
+}
+
+export interface LiveMetrics {
+  project_id: string;
+  generated_at: string;
+  agent: {
+    uptime_seconds: number;
+    started_at: string;
+    api_latency_ms: number;
+    db_status: HealthStatus["db"];
+    reasoning_backend: "available" | "unavailable";
+  };
+  memory: {
+    commits: number;
+    file_edits: number;
+    terminal_commands: number;
+    decisions: number;
+    todos_pending: number;
+    todos_done: number;
+    events_last_hour: number;
+    failed_commands: number;
+    test_commands: number;
+    recent_test_failures: number;
+    changed_files: number;
+  };
+  performance: {
+    events_per_minute_last_hour: number;
+    active_sessions: number;
+    completion_percent: number;
+    module_health: Array<{ name: string; pct: number; basis: string }>;
+  };
+}
+
+export interface MemoryGraphNode {
+  id: string;
+  table: string;
+  content: string;
+  timestamp?: string;
+}
+
+export interface MemoryGraphEdge {
+  source: string;
+  target: string;
+  type: string;
+  shared_terms?: string[];
+}
+
+export interface MemoryGraphData {
+  project_id: string;
+  nodes: MemoryGraphNode[];
+  edges: MemoryGraphEdge[];
 }
 
 // ─── API functions ────────────────────────────────────────────────────────────
@@ -200,6 +372,11 @@ export async function listProjects(): Promise<{ projects: Project[] }> {
   return apiFetch<{ projects: Project[] }>("/projects");
 }
 
+export async function getProject(projectId: string): Promise<{ project: Project | null }> {
+  const { projects } = await listProjects();
+  return { project: projects.find((p) => p.id === projectId) ?? null };
+}
+
 export async function registerProject(
   name: string,
   repoPath: string,
@@ -209,6 +386,18 @@ export async function registerProject(
     method: "POST",
     body: JSON.stringify({ name, repo_path: repoPath, remote_url: remoteUrl }),
   });
+}
+
+export async function getProjectAnalytics(projectId: string): Promise<{ analytics: AnalyticsData }> {
+  return apiFetch<{ analytics: AnalyticsData }>(`/projects/${projectId}/analytics`);
+}
+
+export async function getLiveMetrics(projectId: string): Promise<LiveMetrics> {
+  return apiFetch<LiveMetrics>(`/projects/${projectId}/metrics/live`);
+}
+
+export async function getMemoryGraph(projectId: string): Promise<MemoryGraphData> {
+  return apiFetch<MemoryGraphData>(`/projects/${projectId}/memory-graph`);
 }
 
 export async function getMorningBrief(projectId: string): Promise<{ brief: MorningBrief | null }> {
@@ -272,7 +461,7 @@ export async function approveAction(actionType: string, params: Record<string, u
   });
 }
 
-export async function executeCommand(command: string, opts: { cwd?: string; allowExecute?: boolean; context?: string; sessionId?: string } = {}): Promise<CommandExecuteResponse> {
+export async function executeCommand(command: string, opts: { cwd?: string; allowExecute?: boolean; context?: string; sessionId?: string; projectId?: string } = {}): Promise<CommandExecuteResponse> {
   return apiFetch<CommandExecuteResponse>("/commands/execute", {
     method: "POST",
     body: JSON.stringify({
@@ -281,6 +470,7 @@ export async function executeCommand(command: string, opts: { cwd?: string; allo
       allow_execute: !!opts.allowExecute,
       context: opts.context || "",
       session_id: opts.sessionId || null,
+      project_id: opts.projectId || null,
     }),
   });
 }
@@ -327,6 +517,29 @@ export async function getDecisions(projectId: string, limit = 20): Promise<{ dec
   return apiFetch<{ decisions: DecisionEntry[] }>(`/projects/${projectId}/decisions?limit=${limit}`);
 }
 
+/** Todos for a project. */
+export async function getTodos(projectId: string): Promise<{ todos: Todo[] }> {
+  return apiFetch<{ todos: Todo[] }>(`/projects/${projectId}/todos`);
+}
+
+/** Update a todo's status. */
+export async function updateTodoStatus(projectId: string, todoId: string, status: string): Promise<{ success: boolean; todo_id: string; status: string } | { error: string; success: boolean }> {
+  return apiFetch(`/projects/${projectId}/todos/${todoId}/status`, {
+    method: "POST",
+    body: JSON.stringify({ status }),
+  });
+}
+
+/** Sessions for a project. */
+export async function getSessions(projectId: string): Promise<{ sessions: Session[] }> {
+  return apiFetch<{ sessions: Session[] }>(`/projects/${projectId}/sessions`);
+}
+
+/** Current git branch for a project. */
+export async function getGitBranch(projectId: string): Promise<{ branch: string | null; error: string | null }> {
+  return apiFetch<{ branch: string | null; error: string | null }>(`/projects/${projectId}/git/branch`);
+}
+
 /** End the active session for a project. */
 export async function endSession(projectId: string, summary?: string): Promise<EndSessionResult> {
   return apiFetch<EndSessionResult>(`/projects/${projectId}/sessions/end`, {
@@ -340,6 +553,39 @@ export async function explainRepository(projectId: string, repoPath: string): Pr
   return apiFetch<ExplainRepositoryResult>(`/projects/${projectId}/explain-repository`, {
     method: "POST",
     body: JSON.stringify({ projectId, repoPath }),
+  });
+}
+
+/** Live CPU / GPU / RAM / disk snapshot (processes are scanned only when asked). */
+export async function getSystemMetrics(processes = false): Promise<SystemMetrics> {
+  return apiFetch<SystemMetrics>(`/system/metrics${processes ? "?processes=true" : ""}`);
+}
+
+/** Time spent per app and category for the chosen range. */
+export async function getUsageSummary(range: UsageRange): Promise<UsageSummary> {
+  return apiFetch<UsageSummary>(`/usage/summary?range=${range}`);
+}
+
+/** Focus segments for one local day (default today). */
+export async function getUsageTimeline(day?: string): Promise<UsageTimeline> {
+  return apiFetch<UsageTimeline>(`/usage/timeline${day ? `?day=${encodeURIComponent(day)}` : ""}`);
+}
+
+export async function setUsageTracking(enabled: boolean): Promise<UsageTrackerStatus> {
+  return apiFetch<UsageTrackerStatus>("/usage/tracking", {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export async function getAutostart(): Promise<AutostartStatus> {
+  return apiFetch<AutostartStatus>("/system/autostart");
+}
+
+export async function setAutostart(enabled: boolean): Promise<AutostartStatus> {
+  return apiFetch<AutostartStatus>("/system/autostart", {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
   });
 }
 

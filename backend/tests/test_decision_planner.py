@@ -5,12 +5,10 @@ Tests the real executor in plan(), action handlers, and the border behavior
 wired into triggers. All external services are mocked.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 from decision_engine.planner import (
-    ACTION_POLICY,
     plan,
     _build_brief_payload,
     _execute_flag_related_todos,

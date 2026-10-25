@@ -39,11 +39,27 @@ _DIR_MARKER_FILES = {
     ".env.example",
 }
 
-_WATCHED_EXTENSIONS = frozenset({
-    ".py", ".ts", ".tsx", ".js", ".jsx", ".html", ".css",
-    ".md", ".json", ".yaml", ".yml", ".toml", ".txt", ".rst",
-    ".cfg", ".ini", ".lock",
-})
+_WATCHED_EXTENSIONS = frozenset(
+    {
+        ".py",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".html",
+        ".css",
+        ".md",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".txt",
+        ".rst",
+        ".cfg",
+        ".ini",
+        ".lock",
+    }
+)
 
 _IGNORED_DIRS = {
     ".git",
@@ -100,16 +116,27 @@ def _scan_folder_structure(repo_path: str, max_depth: int = 2) -> list[dict[str,
                 continue
 
             notable_exts = {
-                ".py", ".ts", ".tsx", ".js", ".rs", ".go",
-                ".toml", ".yaml", ".yml", ".json", ".md",
+                ".py",
+                ".ts",
+                ".tsx",
+                ".js",
+                ".rs",
+                ".go",
+                ".toml",
+                ".yaml",
+                ".yml",
+                ".json",
+                ".md",
             }
             notable = child.name in _DIR_MARKER_FILES or child.suffix in notable_exts
 
-            entries.append({
-                "path": str(child.relative_to(root)),
-                "type": "dir" if child.is_dir() else "file",
-                "notable": notable,
-            })
+            entries.append(
+                {
+                    "path": str(child.relative_to(root)),
+                    "type": "dir" if child.is_dir() else "file",
+                    "notable": notable,
+                }
+            )
 
             if child.is_dir():
                 _walk(child, depth + 1)
@@ -150,7 +177,7 @@ def _build_fallback_explanation(
 
     if notes:
         parts.append("\nArchitecture notes:")
-        parts.extend(f"- {n.get('title','(untitled)')}: {n.get('content','')}" for n in notes[:5])
+        parts.extend(f"- {n.get('title', '(untitled)')}: {n.get('content', '')}" for n in notes[:5])
 
     if not parts:
         return "No README, notable files, or architecture notes were found for this project."
@@ -205,13 +232,12 @@ def synthesize_explanation(
             )
 
     if notes:
-        note_bits = [f"- {n.get('title','(untitled)')}: {n.get('content','')}" for n in notes[:5]]
+        note_bits = [f"- {n.get('title', '(untitled)')}: {n.get('content', '')}" for n in notes[:5]]
         context_parts.append("Stored architecture notes:\n" + "\n".join(note_bits))
 
     if recent_memories:
         mem_lines = [
-            f"- [{m.get('table','memory')}] {m.get('content','')}"
-            for m in recent_memories[:8]
+            f"- [{m.get('table', 'memory')}] {m.get('content', '')}" for m in recent_memories[:8]
         ]
         context_parts.append("Recent project memory:\n" + "\n".join(mem_lines))
 
@@ -230,6 +256,7 @@ def synthesize_explanation(
     explanation: str | None = None
     try:
         from ai.bedrock_client import invoke_reasoning
+
         explanation = invoke_reasoning(
             system_prompt=system_prompt,
             user_message=user_message,

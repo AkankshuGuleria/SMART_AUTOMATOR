@@ -29,8 +29,16 @@ def check_privacy_guardrail(content: str) -> bool:
     if not content:
         return False
     secret_patterns = [
-        "ghp_", "AKIA", "sk-", "key=", "token=", "password=", "Bearer ",
-        "api_key", "secret", "credential",
+        "ghp_",
+        "akia",
+        "sk-",
+        "key=",
+        "token=",
+        "password=",
+        "bearer ",
+        "api_key",
+        "secret",
+        "credential",
     ]
     lowered = content.lower()
     return any(pattern in lowered for pattern in secret_patterns)
@@ -43,8 +51,28 @@ def redact_content(content: str) -> tuple[str, bool]:
     redacted = redact_secrets(content)
     was_redacted = redacted != content
     if was_redacted:
-        logger.info("context: redacted %d secret patterns from content", content.count(redacted))
+        logger.info("context: redacted sensitive workflow content")
     return redacted, was_redacted
+
+
+def redact_inputs(inputs: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Redact string values without changing the shape of tool inputs."""
+
+    changed = False
+
+    def _redact(value: Any) -> Any:
+        nonlocal changed
+        if isinstance(value, str):
+            redacted, was_redacted = redact_content(value)
+            changed = changed or was_redacted
+            return redacted
+        if isinstance(value, dict):
+            return {key: _redact(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [_redact(item) for item in value]
+        return value
+
+    return _redact(inputs), changed
 
 
 def resolve_template(template: str, context: dict[str, Any]) -> str:

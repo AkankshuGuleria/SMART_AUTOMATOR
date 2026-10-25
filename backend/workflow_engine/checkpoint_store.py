@@ -12,7 +12,6 @@ import logging
 import os
 import pickle
 from pathlib import Path
-from typing import Any
 
 from workflow_engine.context import ExecutionContext
 
@@ -44,9 +43,13 @@ def save_checkpoint(run_id: str, step_id: str, context: ExecutionContext) -> str
         }
         with open(checkpoint_path, "wb") as f:
             pickle.dump(data, f)
-        logger.info("checkpoint_store: saved | run=%s step=%s path=%s", run_id, step_id, checkpoint_path)
+        logger.info(
+            "checkpoint_store: saved | run=%s step=%s path=%s", run_id, step_id, checkpoint_path
+        )
     except Exception as exc:
-        logger.error("checkpoint_store: failed to save | run=%s step=%s error=%s", run_id, step_id, exc)
+        logger.error(
+            "checkpoint_store: failed to save | run=%s step=%s error=%s", run_id, step_id, exc
+        )
 
     return str(checkpoint_path)
 
@@ -75,7 +78,9 @@ def load_checkpoint(run_id: str, step_id: str) -> ExecutionContext | None:
         logger.info("checkpoint_store: loaded | run=%s step=%s", run_id, step_id)
         return context
     except Exception as exc:
-        logger.error("checkpoint_store: failed to load | run=%s step=%s error=%s", run_id, step_id, exc)
+        logger.error(
+            "checkpoint_store: failed to load | run=%s step=%s error=%s", run_id, step_id, exc
+        )
         return None
 
 

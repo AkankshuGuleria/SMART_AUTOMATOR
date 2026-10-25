@@ -2,8 +2,7 @@
 tests/test_agent_actions.py — Regression tests for Phase 4 Agent Actions.
 """
 
-from unittest.mock import MagicMock, patch
-import pytest
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from api.server import app

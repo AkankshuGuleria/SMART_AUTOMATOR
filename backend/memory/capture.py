@@ -9,7 +9,7 @@ Never:   Must not contain retrieval logic (→ retrieval.py).
            Must not call Bedrock or generate embeddings (→ embeddings.py).
            Must not execute OS actions (→ automation/).
  Ref:     ARCHITECTURE.md §3.2a, §4 (capture data flow), DATABASE_SCHEMA.md.
- 
+
 Phase 1: Implement FileWatcherThread, GitPollerThread, TerminalCaptureThread.
           Wire threads in main.py → _start_background_watchers().
 """
@@ -19,11 +19,29 @@ import os
 import re
 import threading
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 from watchdog.events import FileSystemEventHandler
 
 logger = logging.getLogger(__name__)
+
+
+def _broadcast_activity(kind: str, project_id: str) -> None:
+    """Best-effort WebSocket broadcast of a capture activity event."""
+    try:
+        from api.server import broadcast_sync
+
+        broadcast_sync(
+            {
+                "type": "activity",
+                "data": {"kind": kind, "project_id": project_id},
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+        )
+    except Exception:
+        pass
+
 
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bghp_[A-Za-z0-9_]{20,}\b"), "ghp_[REDACTED]"),
@@ -37,11 +55,59 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 # File extensions to watch for changes
-_WATCHED_EXTENSIONS = frozenset({
-    ".py", ".ts", ".tsx", ".js", ".jsx", ".html", ".css",
-    ".md", ".json", ".yaml", ".yml", ".toml", ".txt", ".rst",
-    ".cfg", ".ini", ".lock",
-})
+_WATCHED_EXTENSIONS = frozenset(
+    {
+        ".py",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".html",
+        ".css",
+        ".md",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".txt",
+        ".rst",
+        ".cfg",
+        ".ini",
+        ".lock",
+    }
+)
+
+# Directories that are generated, vendored or VCS-internal. Watching them
+# turned every `npm install` / build into thousands of DB writes and
+# embedding calls, so events under these paths are dropped up front.
+_IGNORED_DIRS = frozenset(
+    {
+        "node_modules", ".git", ".venv", "venv", "env", "__pycache__", "dist", "build",
+        "target", "out", ".next", ".nuxt", ".svelte-kit", ".turbo", ".cache", ".parcel-cache",
+        ".vite", "coverage", ".pytest_cache", ".pytest-tmp", ".ruff_cache", ".mypy_cache",
+        ".tox", ".idea", ".vscode", ".kilo", ".cursor", ".claude", "site-packages",
+    }
+)
+_IGNORED_SUFFIXES = (".lock", "-lock.json", ".min.js", ".map")
+# One row per file per window: editors save repeatedly, and the stored summary
+# ("File modified: path") is identical each time.
+_FILE_EDIT_DEBOUNCE_S = 30.0
+
+
+def is_ignored_path(file_path: str, project_path: str = "") -> bool:
+    """True for paths inside generated/vendored folders or lock/minified files."""
+    rel = file_path
+    if project_path:
+        try:
+            rel = os.path.relpath(file_path, project_path)
+        except ValueError:
+            rel = file_path
+    parts = Path(rel).parts
+    if any(part in _IGNORED_DIRS for part in parts[:-1]):
+        return True
+    name = parts[-1].lower() if parts else ""
+    return name.endswith(_IGNORED_SUFFIXES)
+
 
 # Polling intervals (seconds)
 _GIT_POLL_INTERVAL = 30
@@ -77,13 +143,11 @@ class FileWatcherThread(threading.Thread):
         self.session_id = session_id
         self._stop_event = threading.Event()
         self._debounce: dict[str, float] = {}
-        self._debounce_window = 0.5  # seconds
+        self._debounce_window = _FILE_EDIT_DEBOUNCE_S
 
     def run(self) -> None:
         if not self.project_path or not os.path.isdir(self.project_path):
-            logger.warning(
-                "FileWatcherThread: project path not found — %s", self.project_path
-            )
+            logger.warning("FileWatcherThread: project path not found — %s", self.project_path)
             return
 
         try:
@@ -98,7 +162,8 @@ class FileWatcherThread(threading.Thread):
         observer.start()
         logger.info(
             "FileWatcherThread started | project=%s path=%s",
-            self.project_id, self.project_path,
+            self.project_id,
+            self.project_path,
         )
 
         try:
@@ -113,16 +178,19 @@ class FileWatcherThread(threading.Thread):
         self._stop_event.set()
 
     def _on_file_changed(self, file_path: str) -> None:
-        """Handle a file change event — debounce then write to DB."""
+        """Handle a file change event — filter, debounce, then write to DB."""
+        ext = Path(file_path).suffix.lower()
+        if ext not in _WATCHED_EXTENSIONS or is_ignored_path(file_path, self.project_path):
+            return
+
         now = time.time()
         last_seen = self._debounce.get(file_path, 0)
         if now - last_seen < self._debounce_window:
             return
+        if len(self._debounce) > 2000:
+            cutoff = now - self._debounce_window
+            self._debounce = {k: v for k, v in self._debounce.items() if v >= cutoff}
         self._debounce[file_path] = now
-
-        ext = Path(file_path).suffix.lower()
-        if ext not in _WATCHED_EXTENSIONS:
-            return
 
         change_summary = f"File modified: {file_path}"
         self._write_file_edit(file_path, change_summary)
@@ -134,6 +202,7 @@ class FileWatcherThread(threading.Thread):
         embedding = None
         try:
             from memory.embeddings import generate_embedding_for_capture
+
             embedding = generate_embedding_for_capture(change_summary)
         except Exception as exc:
             logger.debug("FileWatcherThread: embedding generation skipped — %s", exc)
@@ -144,21 +213,40 @@ class FileWatcherThread(threading.Thread):
                 return
             try:
                 from sqlalchemy import text
-                session.execute(
-                    text(
-                        "INSERT INTO file_edits "
-                        "(project_id, session_id, file_path, change_summary) "
-                        "VALUES (:project_id, :session_id, :file_path, :change_summary)"
-                    ),
-                    {
-                        "project_id": self.project_id,
-                        "session_id": self.session_id,
-                        "file_path": file_path,
-                        "change_summary": change_summary,
-                    },
-                )
+
+                if embedding:
+                    session.execute(
+                        text(
+                            "INSERT INTO file_edits "
+                            "(project_id, session_id, file_path, change_summary, change_summary_embedding) "
+                            "VALUES (:project_id, :session_id, :file_path, :change_summary, "
+                            "CAST(:embedding AS vector))"
+                        ),
+                        {
+                            "project_id": self.project_id,
+                            "session_id": self.session_id,
+                            "file_path": file_path,
+                            "change_summary": change_summary,
+                            "embedding": embedding,
+                        },
+                    )
+                else:
+                    session.execute(
+                        text(
+                            "INSERT INTO file_edits "
+                            "(project_id, session_id, file_path, change_summary) "
+                            "VALUES (:project_id, :session_id, :file_path, :change_summary)"
+                        ),
+                        {
+                            "project_id": self.project_id,
+                            "session_id": self.session_id,
+                            "file_path": file_path,
+                            "change_summary": change_summary,
+                        },
+                    )
                 session.commit()
                 logger.debug("FileWatcherThread: recorded edit | %s", file_path)
+                _broadcast_activity("file", self.project_id)
             except Exception as exc:
                 session.rollback()
                 logger.error("FileWatcherThread: failed to write file edit — %s", exc)
@@ -213,9 +301,7 @@ class GitPollerThread(threading.Thread):
 
     def run(self) -> None:
         if not self.project_path or not os.path.isdir(self.project_path):
-            logger.warning(
-                "GitPollerThread: project path not found — %s", self.project_path
-            )
+            logger.warning("GitPollerThread: project path not found — %s", self.project_path)
             return
 
         try:
@@ -227,14 +313,13 @@ class GitPollerThread(threading.Thread):
         try:
             repo = git.Repo(self.project_path)
         except git.InvalidGitRepositoryError:
-            logger.warning(
-                "GitPollerThread: not a git repo — %s", self.project_path
-            )
+            logger.warning("GitPollerThread: not a git repo — %s", self.project_path)
             return
 
         logger.info(
             "GitPollerThread started | project=%s path=%s",
-            self.project_id, self.project_path,
+            self.project_id,
+            self.project_path,
         )
 
         while not self._stop_event.is_set():
@@ -286,6 +371,7 @@ class GitPollerThread(threading.Thread):
         message_embedding = None
         try:
             from memory.embeddings import generate_embedding_for_capture
+
             message_embedding = generate_embedding_for_capture(commit.message.strip()[:500])
         except Exception as exc:
             logger.debug("GitPollerThread: embedding generation skipped — %s", exc)
@@ -296,6 +382,7 @@ class GitPollerThread(threading.Thread):
                 return
             try:
                 from sqlalchemy import text
+
                 session.execute(
                     text(
                         "INSERT INTO commits "
@@ -320,6 +407,8 @@ class GitPollerThread(threading.Thread):
                     commit.message.strip()[:40],
                 )
 
+                _broadcast_activity("commit", self.project_id)
+
                 # Fire the on_commit trigger for the Decision Engine (Phase 4.5)
                 self._fire_on_commit_trigger(commit)
             except Exception as exc:
@@ -330,6 +419,7 @@ class GitPollerThread(threading.Thread):
         """Fire the on_commit trigger for the Decision Engine."""
         try:
             from decision_engine.triggers import on_commit
+
             on_commit(self.project_id, commit.hexsha, commit.message.strip())
         except Exception as exc:
             logger.debug("GitPollerThread: on_commit trigger skipped — %s", exc)
@@ -356,10 +446,12 @@ class TerminalCaptureThread(threading.Thread):
         project_id: str = "",
         session_id: str | None = None,
         daemon: bool = True,
+        project_path: str | None = None,
     ) -> None:
         super().__init__(name="TerminalCaptureThread", daemon=daemon)
         self.project_id = project_id
         self.session_id = session_id
+        self.project_path = project_path
         self._stop_event = threading.Event()
         self._seen_commands: set[str] = set()
 
@@ -391,8 +483,14 @@ class TerminalCaptureThread(threading.Thread):
         """Return the path to the PowerShell ConsoleHost history file on Windows."""
         home = Path.home()
         candidate = (
-            home / "AppData" / "Roaming" / "Microsoft" / "Windows"
-            / "PowerShell" / "PSReadLine" / "ConsoleHost_history.txt"
+            home
+            / "AppData"
+            / "Roaming"
+            / "Microsoft"
+            / "Windows"
+            / "PowerShell"
+            / "PSReadLine"
+            / "ConsoleHost_history.txt"
         )
         if candidate.exists():
             return candidate
@@ -420,6 +518,18 @@ class TerminalCaptureThread(threading.Thread):
 
     def _write_command(self, command: str) -> None:
         """Write a terminal_commands row via db/client."""
+        # Scope guard: only attribute commands run within the watched project's
+        # repo path. Prevents cross-project terminal history leakage.
+        cwd = os.getcwd()
+        if self.project_path:
+            try:
+                if os.path.commonpath([os.path.realpath(cwd), os.path.realpath(self.project_path)]) != os.path.realpath(self.project_path):
+                    return
+            except ValueError:
+                return
+        if not self.project_id:
+            return
+
         from db.client import get_session
 
         redacted = redact_secrets(command)
@@ -427,6 +537,7 @@ class TerminalCaptureThread(threading.Thread):
         command_embedding = None
         try:
             from memory.embeddings import generate_embedding_for_capture
+
             command_embedding = generate_embedding_for_capture(redacted)
         except Exception as exc:
             logger.debug("TerminalCaptureThread: embedding generation skipped — %s", exc)
@@ -437,6 +548,7 @@ class TerminalCaptureThread(threading.Thread):
                 return
             try:
                 from sqlalchemy import text
+
                 session.execute(
                     text(
                         "INSERT INTO terminal_commands "
@@ -454,12 +566,14 @@ class TerminalCaptureThread(threading.Thread):
                 )
                 session.commit()
                 logger.debug("TerminalCaptureThread: recorded command | %s...", redacted[:60])
+                _broadcast_activity("terminal", self.project_id)
             except Exception:
                 session.rollback()
                 # Fallback: insert without command_embedding column
                 # (handles older DB schemas that don't have the column yet)
                 try:
                     from sqlalchemy import text
+
                     session.execute(
                         text(
                             "INSERT INTO terminal_commands "
@@ -475,7 +589,11 @@ class TerminalCaptureThread(threading.Thread):
                         },
                     )
                     session.commit()
-                    logger.debug("TerminalCaptureThread: recorded command (no embedding) | %s...", redacted[:60])
+                    logger.debug(
+                        "TerminalCaptureThread: recorded command (no embedding) | %s...",
+                        redacted[:60],
+                    )
+                    _broadcast_activity("terminal", self.project_id)
                 except Exception as exc:
                     session.rollback()
                     logger.error("TerminalCaptureThread: failed to write command — %s", exc)

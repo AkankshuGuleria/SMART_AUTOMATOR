@@ -68,11 +68,7 @@ logs/
 demo/*.mp4
 demo/*.mov
 demo/*.webm
-project_uuid.txt
 .vite/
 .cursor/
 .kilo/
 .claude/
-plans/
-backend/test_results.txt
-

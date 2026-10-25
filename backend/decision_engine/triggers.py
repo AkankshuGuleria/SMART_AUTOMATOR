@@ -20,8 +20,8 @@ GUARDRAILS (from PROJECT.md §9):
 from __future__ import annotations
 
 import logging
-import time
 import threading
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -66,10 +66,14 @@ def on_commit(project_id: str, commit_hash: str, commit_message: str) -> None:
     if not _should_fire("on_commit", project_id):
         return
 
-    _log_trigger_event("on_commit", project_id, {
-        "commit_hash": commit_hash,
-        "commit_message": commit_message[:200],
-    })
+    _log_trigger_event(
+        "on_commit",
+        project_id,
+        {
+            "commit_hash": commit_hash,
+            "commit_message": commit_message[:200],
+        },
+    )
 
     context = {
         "project_id": project_id,
@@ -79,6 +83,7 @@ def on_commit(project_id: str, commit_hash: str, commit_message: str) -> None:
 
     try:
         from decision_engine.planner import plan
+
         plan_result = plan("on_commit", context)
         logger.info(
             "on_commit actions executed | project=%s actions=%d",
@@ -91,6 +96,7 @@ def on_commit(project_id: str, commit_hash: str, commit_message: str) -> None:
     # Background: periodically refresh taste preferences from recent activity
     try:
         import agent_actions as _aa
+
         _aa.analyze_taste_preferences(project_id, developer_id=project_id)
     except Exception as exc:
         logger.debug("on_commit: taste preferences refresh skipped — %s", exc)
@@ -112,9 +118,13 @@ def on_session_end(project_id: str, session_id: str) -> None:
     if not _should_fire("on_session_end", project_id):
         return
 
-    _log_trigger_event("on_session_end", project_id, {
-        "session_id": session_id,
-    })
+    _log_trigger_event(
+        "on_session_end",
+        project_id,
+        {
+            "session_id": session_id,
+        },
+    )
 
     context = {
         "project_id": project_id,
@@ -123,6 +133,7 @@ def on_session_end(project_id: str, session_id: str) -> None:
 
     try:
         from decision_engine.planner import plan
+
         plan_result = plan("on_session_end", context)
         logger.info(
             "on_session_end actions executed | project=%s actions=%d",
@@ -135,10 +146,12 @@ def on_session_end(project_id: str, session_id: str) -> None:
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+
 def _log_trigger_event(trigger: str, project_id: str, context: dict[str, Any]) -> None:
     """Log a trigger event to decision_log for provenance tracking."""
     try:
         from db.client import insert_decision
+
         decision_text = f"Trigger '{trigger}' fired for project {project_id}"
         rationale = (
             f"Trigger '{trigger}' was detected automatically. "

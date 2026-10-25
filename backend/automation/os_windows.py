@@ -45,13 +45,16 @@ def checkout_git_branch(repo_path: str, branch: str) -> bool:
         repo.git.checkout(branch)
         logger.info(
             "os_windows.checkout_git_branch: success | repo=%s branch=%s",
-            repo_path, branch,
+            repo_path,
+            branch,
         )
         return True
     except Exception as exc:
         logger.error(
             "os_windows.checkout_git_branch: failed | repo=%s branch=%s error=%s",
-            repo_path, branch, exc,
+            repo_path,
+            branch,
+            exc,
         )
         return False
 
@@ -90,7 +93,8 @@ def open_terminal(cwd: str = "") -> bool:
     except Exception as exc:
         logger.error(
             "os_windows.open_terminal: failed to open terminal | cwd=%s error=%s",
-            cwd, exc,
+            cwd,
+            exc,
         )
         return False
 
@@ -117,7 +121,9 @@ def open_terminal_with_command(command: str, cwd: str = "") -> int | None:
         )
         logger.info(
             "os_windows.open_terminal_with_command: started | pid=%d cmd='%s' cwd=%s",
-            proc.pid, command[:80], cwd,
+            proc.pid,
+            command[:80],
+            cwd,
         )
         return proc.pid
     except FileNotFoundError:
@@ -125,7 +131,9 @@ def open_terminal_with_command(command: str, cwd: str = "") -> int | None:
     except Exception as exc:
         logger.error(
             "os_windows.open_terminal_with_command: failed | cmd='%s' cwd=%s error=%s",
-            command[:80], cwd, exc,
+            command[:80],
+            cwd,
+            exc,
         )
     return None
 
@@ -151,7 +159,9 @@ def launch_editor(project_path: str, editor: str = "code") -> bool:
     except Exception as exc:
         logger.error(
             "os_windows.launch_editor: failed | editor=%s path=%s error=%s",
-            editor, project_path, exc,
+            editor,
+            project_path,
+            exc,
         )
         return False
 
@@ -213,7 +223,9 @@ def launch_app(app_name: str) -> bool:
             logger.info("os_windows.launch_app: protocol launch | target=%s", exe)
             return True
         except Exception as exc:
-            logger.error("os_windows.launch_app: protocol launch failed | target=%s error=%s", exe, exc)
+            logger.error(
+                "os_windows.launch_app: protocol launch failed | target=%s error=%s", exe, exc
+            )
             return False
 
     _run_timeout = 8
@@ -235,13 +247,17 @@ def launch_app(app_name: str) -> bool:
                 stderr = (completed.stderr or completed.stdout or "").strip()
                 logger.warning(
                     "os_windows.launch_app: shell command failed | app=%s exe=%s error=%s",
-                    app_name, exe, stderr,
+                    app_name,
+                    exe,
+                    stderr,
                 )
                 return False
             logger.info("os_windows.launch_app: launched | app=%s exe=%s", app_name, exe)
             return True
         except Exception as exc:
-            logger.error("os_windows.launch_app: failed | app=%s exe=%s error=%s", app_name, exe, exc)
+            logger.error(
+                "os_windows.launch_app: failed | app=%s exe=%s error=%s", app_name, exe, exc
+            )
             return False
 
     try:
@@ -261,7 +277,9 @@ def launch_app(app_name: str) -> bool:
             stderr = (completed.stderr or completed.stdout or "").strip()
             logger.warning(
                 "os_windows.launch_app: Start-Process failed | app=%s exe=%s error=%s",
-                app_name, exe, stderr,
+                app_name,
+                exe,
+                stderr,
             )
             return False
         logger.info("os_windows.launch_app: launched | app=%s exe=%s", app_name, exe)
@@ -380,14 +398,14 @@ def focus_app(app_name: str) -> bool:
     try:
         # Try to find and activate the window via PowerShell Show-Window + Set-ForegroundWindow
         script = (
-            f'Add-Type -AssemblyName Microsoft.VisualBasic; '
+            f"Add-Type -AssemblyName Microsoft.VisualBasic; "
             f'$proc = Get-Process -Name "{app_name}" -ErrorAction SilentlyContinue; '
-            f'if ($proc) {{ '
-            f'  [Microsoft.VisualBasic.Interaction]::AppActivate($proc.Id); '
+            f"if ($proc) {{ "
+            f"  [Microsoft.VisualBasic.Interaction]::AppActivate($proc.Id); "
             f'  Write-Output "activated"; '
-            f'}} else {{ '
+            f"}} else {{ "
             f'  Write-Output "not_found"; '
-            f'}}'
+            f"}}"
         )
         completed = subprocess.run(
             ["powershell", "-NoProfile", "-Command", script],
@@ -414,7 +432,16 @@ def send_keystrokes(keystrokes: str) -> bool:
     Supports limited safe keys: Ctrl+V, Enter, Ctrl+L, Alt+Tab, Tab, Escape.
     Returns True on success, False on failure.
     """
-    safe_patterns = {"ctrl+v", "enter", "ctrl+l", "ctrl+enter", "ctrl+return", "alt+tab", "tab", "escape"}
+    safe_patterns = {
+        "ctrl+v",
+        "enter",
+        "ctrl+l",
+        "ctrl+enter",
+        "ctrl+return",
+        "alt+tab",
+        "tab",
+        "escape",
+    }
     normalized = keystrokes.lower().strip()
     if normalized not in safe_patterns:
         logger.warning(
@@ -473,27 +500,29 @@ def capture_screen(region: str | None = None) -> str:
             # Parse "left,top,width,height"
             parts = [p.strip() for p in region.split(",")]
             if len(parts) != 4:
-                logger.warning("os_windows.capture_screen: invalid region format | region=%s", region)
+                logger.warning(
+                    "os_windows.capture_screen: invalid region format | region=%s", region
+                )
                 return ""
             left, top, width, height = parts
             script = (
-                f'Add-Type -AssemblyName System.Drawing; '
-                f'$bmp = New-Object System.Drawing.Bitmap([int]$width, [int]$height); '
-                f'$gfx = [System.Drawing.Graphics]::FromImage($bmp); '
-                f'$gfx.CopyFromScreen([int]$left, [int]$top, 0, 0, '
-                f'[System.Drawing.Size]::new([int]$width, [int]$height)); '
+                f"Add-Type -AssemblyName System.Drawing; "
+                f"$bmp = New-Object System.Drawing.Bitmap([int]$width, [int]$height); "
+                f"$gfx = [System.Drawing.Graphics]::FromImage($bmp); "
+                f"$gfx.CopyFromScreen([int]$left, [int]$top, 0, 0, "
+                f"[System.Drawing.Size]::new([int]$width, [int]$height)); "
                 f'$bmp.Save("{path}", [System.Drawing.Imaging.ImageFormat]::Png); '
                 f'$gfx.Dispose(); $bmp.Dispose(); Write-Output "saved"'
             )
         else:
             script = (
-                f'Add-Type -AssemblyName System.Drawing; '
+                f"Add-Type -AssemblyName System.Drawing; "
                 f'[System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") | Out-Null; '
-                f'$bmp = New-Object System.Drawing.Bitmap('
-                f'[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width, '
-                f'[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); '
-                f'$gfx = [System.Drawing.Graphics]::FromImage($bmp); '
-                f'$gfx.CopyFromScreen(0, 0, 0, 0, $bmp.Size); '
+                f"$bmp = New-Object System.Drawing.Bitmap("
+                f"[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width, "
+                f"[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); "
+                f"$gfx = [System.Drawing.Graphics]::FromImage($bmp); "
+                f"$gfx.CopyFromScreen(0, 0, 0, 0, $bmp.Size); "
                 f'$bmp.Save("{path}", [System.Drawing.Imaging.ImageFormat]::Png); '
                 f'$gfx.Dispose(); $bmp.Dispose(); Write-Output "saved"'
             )

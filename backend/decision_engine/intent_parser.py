@@ -12,7 +12,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 
 class IntentType(str, Enum):
@@ -57,7 +56,7 @@ class IntentType(str, Enum):
 class ParsedIntent:
     intent: IntentType
     confidence: float
-    project_id: Optional[str] = None
+    project_id: str | None = None
     params: dict[str, str] | None = None
     raw: str = ""
 
@@ -245,7 +244,6 @@ class IntentParser:
                 re.IGNORECASE,
             ),
         ),
-
         # ── Git history queries ───────────────────────────────────────────────────
         (
             IntentType.GIT_LOG,
@@ -378,7 +376,7 @@ class IntentParser:
         ),
     ]
 
-    def parse(self, message: str, active_project_id: Optional[str] = None) -> ParsedIntent:
+    def parse(self, message: str, active_project_id: str | None = None) -> ParsedIntent:
         text = message.strip()
         lowered = text.lower()
 
@@ -405,6 +403,7 @@ class IntentParser:
                     # Extract app_name and prompt from the compound message
                     # Pattern: "open <app> and <action> <prompt>"
                     import re as _re
+
                     target = text
                     # Extract app name from first capture group
                     if m.groups():
@@ -462,3 +461,12 @@ class IntentParser:
             return ParsedIntent(intent=IntentType.GENERAL_CHAT, confidence=0.6, raw=text)
 
         return ParsedIntent(intent=IntentType.UNKNOWN, confidence=0.0, raw=text)
+
+
+def parse_intent(message: str, active_project_id: str | None = None) -> ParsedIntent:
+    """Parse a chat message through the shared MVP intent parser.
+
+    Keeping this module-level entry point makes API callers independent of the
+    parser implementation while preserving the parser's project context.
+    """
+    return IntentParser().parse(message, active_project_id=active_project_id)

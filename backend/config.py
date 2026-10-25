@@ -48,7 +48,13 @@ class Settings:
 
     @property
     def bedrock_available(self) -> bool:
-        return bool(self.aws_region and self.aws_bedrock_model_id)
+        if not (self.aws_region and self.aws_bedrock_model_id):
+            return False
+        if self.aws_access_key_id == "REPLACE_WITH_ACCESS_KEY_ID":
+            return False
+        if self.aws_secret_access_key == "REPLACE_WITH_SECRET_ACCESS_KEY":  # noqa: S105
+            return False
+        return True
 
     @property
     def ollama_available(self) -> bool:

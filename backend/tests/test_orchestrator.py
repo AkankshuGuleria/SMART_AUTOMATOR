@@ -2,22 +2,17 @@
 tests/test_orchestrator.py — AUTOMATA orchestrator loop tests.
 """
 
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 from decision_engine.orchestrator import (
     MAX_ITERATIONS,
-    MAX_TOOL_CALLS,
-    _call_reflector,
-    _call_planner,
     _extract_json,
     _parse_plan,
     _parse_reflection,
     run_orchestrator,
 )
-from decision_engine.tools import Tool, get_tool, register
+from decision_engine.tools import Tool, register
 
 
 class TestExtractJson:

@@ -18,6 +18,7 @@ import logging
 import os
 from typing import Any
 
+from automation.dev_servers import start_project_dev_servers
 from automation.os_windows import (
     checkout_git_branch,
     launch_editor,
@@ -67,28 +68,43 @@ def restore_workspace(project_id: str, session_id: str | None = None) -> dict[st
 
     repo_path = project.get("repo_path", "")
     if not repo_path or not os.path.isdir(repo_path):
-        steps.append({
-            "step": "git_checkout",
-            "status": "error",
-            "detail": f"Repo path not found: {repo_path}",
-        })
-        overall = "error"
+        # Without the folder nothing else can be restored; do not open a
+        # terminal or editor somewhere unrelated.
+        reason = "Skipped: project folder not found"
+        return {
+            "project_id": project_id,
+            "steps": [
+                {
+                    "step": "git_checkout",
+                    "status": "error",
+                    "detail": f"Repo path not found: {repo_path or '(empty)'} — re-register the project with its full folder path",
+                },
+                *(
+                    {"step": name, "status": "skipped", "detail": reason}
+                    for name in ("terminal", "dev_servers", "editor", "browser")
+                ),
+            ],
+            "overall": "error",
+        }
     else:
         # Step 1: Git branch checkout
         try:
             import git
+
             repo = git.Repo(repo_path)
             current_branch = repo.active_branch.name if repo.active_branch else "main"
             success = checkout_git_branch(repo_path, current_branch)
-            steps.append({
-                "step": "git_checkout",
-                "status": "ok" if success else "error",
-                "detail": (
-                    f"Checked out branch '{current_branch}'"
-                    if success
-                    else "Git checkout failed"
-                ),
-            })
+            steps.append(
+                {
+                    "step": "git_checkout",
+                    "status": "ok" if success else "error",
+                    "detail": (
+                        f"Checked out branch '{current_branch}'"
+                        if success
+                        else "Git checkout failed"
+                    ),
+                }
+            )
             if not success:
                 overall = "partial"
         except Exception as exc:
@@ -98,32 +114,59 @@ def restore_workspace(project_id: str, session_id: str | None = None) -> dict[st
     # Step 2: Terminal restore
     try:
         success = open_terminal(repo_path)
-        steps.append({
-            "step": "terminal",
-            "status": "ok" if success else "error",
-            "detail": "Terminal opened" if success else "Failed to open terminal",
-        })
+        steps.append(
+            {
+                "step": "terminal",
+                "status": "ok" if success else "error",
+                "detail": "Terminal opened" if success else "Failed to open terminal",
+            }
+        )
         if not success:
             overall = "partial"
     except Exception as exc:
         steps.append({"step": "terminal", "status": "error", "detail": str(exc)})
         overall = "partial"
 
-    # Step 3: Dev servers — skipped (requires server config, Phase 3+)
-    steps.append({
-        "step": "dev_servers",
-        "status": "skipped",
-        "detail": "Dev server restore requires server configuration (Phase 3+)",
-    })
+    # Step 3: Dev servers
+    try:
+        server_results = start_project_dev_servers(repo_path)
+        statuses = [r.get("status") for r in server_results]
+        if statuses and all(s == "skipped" for s in statuses):
+            overall_status = "skipped"
+        elif statuses and all(s in {"ok", "skipped"} for s in statuses):
+            overall_status = "ok"
+        elif any(s == "ok" for s in statuses):
+            overall_status = "partial"
+        else:
+            overall_status = "error"
+        detail = "; ".join(
+            f"{r.get('server', 'server')}: {r.get('status', '?')}"
+            + (f" ({r['detail']})" if r.get("detail") else "")
+            for r in server_results
+        ) or "No dev servers detected"
+        steps.append(
+            {
+                "step": "dev_servers",
+                "status": overall_status,
+                "detail": detail,
+            }
+        )
+        if overall_status != "ok":
+            overall = "partial"
+    except Exception as exc:
+        steps.append({"step": "dev_servers", "status": "error", "detail": str(exc)})
+        overall = "partial"
 
     # Step 4: Editor launch (stretch)
     try:
         success = launch_editor(repo_path)
-        steps.append({
-            "step": "editor",
-            "status": "ok" if success else "error",
-            "detail": "Editor launched" if success else "Editor not available",
-        })
+        steps.append(
+            {
+                "step": "editor",
+                "status": "ok" if success else "error",
+                "detail": "Editor launched" if success else "Editor not available",
+            }
+        )
         if not success and overall == "ok":
             overall = "partial"
     except Exception as exc:
@@ -132,15 +175,16 @@ def restore_workspace(project_id: str, session_id: str | None = None) -> dict[st
             overall = "partial"
 
     # Step 5: Browser restore (stretch)
-    steps.append({
-        "step": "browser",
-        "status": "skipped",
-        "detail": "Browser tab restore not yet implemented (Phase 3+)",
-    })
+    steps.append(
+        {
+            "step": "browser",
+            "status": "skipped",
+            "detail": "Browser tab restore not yet implemented (Phase 3+)",
+        }
+    )
 
     return {
         "project_id": project_id,
         "steps": steps,
         "overall": overall,
     }
-

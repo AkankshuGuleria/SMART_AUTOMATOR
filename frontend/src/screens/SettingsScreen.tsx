@@ -2,11 +2,19 @@
  * screens/SettingsScreen.tsx
  * Settings screen — AI mode, appearance, about panel.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { defaultContainer, defaultItem } from '../components/ui/VariantHelpers'
-import { Settings, Cpu, Moon, Sun, Zap, Info, ExternalLink } from 'lucide-react'
+import { Settings, Cpu, Moon, Sun, Zap, Info, ExternalLink, Power, Clock } from 'lucide-react'
 import GlassCard from '../components/ui/GlassCard'
+import {
+  getAutostart,
+  setAutostart,
+  getUsageSummary,
+  setUsageTracking,
+  type AutostartStatus,
+  type UsageTrackerStatus,
+} from '../lib/api'
 
 interface SettingsProps {
   reasoningMode: string
@@ -18,13 +26,112 @@ interface SettingsProps {
 const container = defaultContainer
 const item = defaultItem
 
-export default function SettingsScreen({ reasoningMode, onModeChange, theme, onThemeToggle }: SettingsProps) {
-  const [activeMode, setActiveMode] = useState(reasoningMode)
+function Toggle({ checked, disabled, onChange, label }: { checked: boolean; disabled?: boolean; onChange: (v: boolean) => void; label: string }) {
+  return (
+    <button
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      style={{
+        width: 40, height: 22, borderRadius: 99, border: 'none', padding: 2, flexShrink: 0,
+        background: checked ? 'var(--accent)' : 'var(--bg-hover)',
+        cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
+        transition: 'background var(--dur-fast) var(--ease-in-out)',
+        display: 'flex', justifyContent: checked ? 'flex-end' : 'flex-start',
+      }}
+    >
+      <motion.span layout transition={{ type: 'spring', stiffness: 500, damping: 32 }}
+        style={{ width: 18, height: 18, borderRadius: '50%', background: '#fff', display: 'block' }} />
+    </button>
+  )
+}
 
-  const handleMode = (m: string) => {
-    setActiveMode(m)
-    onModeChange(m)
+function BackgroundAgentCard() {
+  const [autostart, setAutostartState] = useState<AutostartStatus | null>(null)
+  const [tracking, setTracking] = useState<UsageTrackerStatus | null>(null)
+  const [busy, setBusy] = useState<'autostart' | 'tracking' | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    getAutostart().then(setAutostartState).catch(() => setAutostartState(null))
+    getUsageSummary('today').then(s => setTracking(s.tracking ?? null)).catch(() => setTracking(null))
+  }, [])
+
+  const toggleAutostart = async (enabled: boolean) => {
+    setBusy('autostart'); setError(null)
+    try {
+      const next = await setAutostart(enabled)
+      setAutostartState(next)
+      if (next.error) setError(next.error)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not change autostart')
+    } finally { setBusy(null) }
   }
+
+  const toggleTracking = async (enabled: boolean) => {
+    setBusy('tracking'); setError(null)
+    try { setTracking(await setUsageTracking(enabled)) } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not change tracking')
+    } finally { setBusy(null) }
+  }
+
+  const trackingOn = !!tracking && tracking.running && !tracking.paused
+  const rows = [
+    {
+      icon: Power,
+      title: 'Start at sign-in',
+      desc: autostart?.supported === false
+        ? 'Only available on Windows.'
+        : 'Runs the agent hidden in the background when you sign in to Windows, so capture and usage tracking never stop.',
+      checked: !!autostart?.enabled,
+      disabled: !autostart?.supported || busy === 'autostart',
+      onChange: toggleAutostart,
+    },
+    {
+      icon: Clock,
+      title: 'Record app usage',
+      desc: tracking && !tracking.supported
+        ? 'Foreground-app tracking is Windows-only.'
+        : 'Records which app has focus and for how long. Idle time is skipped. Stored only on this PC.',
+      checked: trackingOn,
+      disabled: !tracking?.supported || tracking?.disabled_by_env || busy === 'tracking',
+      onChange: toggleTracking,
+    },
+  ]
+
+  return (
+    <GlassCard hoverable={false}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+        <Power size={16} color="var(--success)" />
+        <h3 style={{ color: 'var(--text-primary)', fontSize: '0.9rem' }}>Background agent</h3>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+        {rows.map(r => (
+          <div key={r.title} style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+            <r.icon size={15} color="var(--text-tertiary)" style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>{r.title}</div>
+              <div style={{ fontSize: '0.74rem', color: 'var(--text-tertiary)', marginTop: 2 }}>{r.desc}</div>
+            </div>
+            <Toggle checked={r.checked} disabled={r.disabled} onChange={r.onChange} label={r.title} />
+          </div>
+        ))}
+        {tracking?.db_path && (
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
+            Usage data: {tracking.db_path}
+          </div>
+        )}
+        {error && <div style={{ fontSize: '0.75rem', color: 'var(--error)' }}>{error}</div>}
+      </div>
+    </GlassCard>
+  )
+}
+
+export default function SettingsScreen({ reasoningMode, onModeChange, theme, onThemeToggle }: SettingsProps) {
+  const activeMode = reasoningMode
+  const handleMode = (m: string) => onModeChange(m)
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: 680, width: '100%' }}>
@@ -46,9 +153,9 @@ export default function SettingsScreen({ reasoningMode, onModeChange, theme, onT
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {[
-                { id: 'auto', label: 'Auto', desc: 'Ollama → Groq → Bedrock fallback chain. Best quality.', icon: Zap, color: 'var(--accent)' },
+                { id: 'auto', label: 'Auto', desc: 'Configured cloud providers first (Groq, OpenRouter, Gemini, …), then Bedrock, then local Ollama.', icon: Zap, color: 'var(--accent)' },
                 { id: 'local', label: 'Local only', desc: 'Uses Ollama only. Works offline. No API costs.', icon: Cpu, color: 'var(--success)' },
-                { id: 'cloud', label: 'Cloud', desc: 'Amazon Bedrock + APIs. Highest quality, requires keys.', icon: ExternalLink, color: 'var(--info)' },
+                { id: 'cloud', label: 'Cloud only', desc: 'Cloud providers and Bedrock only; never falls back to Ollama. Requires API keys.', icon: ExternalLink, color: 'var(--info)' },
               ].map(opt => {
                 const Icon = opt.icon
                 const isSelected = activeMode === opt.id
@@ -93,6 +200,11 @@ export default function SettingsScreen({ reasoningMode, onModeChange, theme, onT
               })}
             </div>
           </GlassCard>
+        </motion.div>
+
+        {/* Background agent */}
+        <motion.div variants={item}>
+          <BackgroundAgentCard />
         </motion.div>
 
         {/* Appearance */}

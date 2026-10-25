@@ -16,13 +16,31 @@ PROJECT_NAME = "AUTOMATA"
 REPO_PATH = str(ROOT)
 
 
-def seed() -> None:
-    project_id = insert_project(PROJECT_NAME, REPO_PATH)
-    if project_id is None:
-        print("Failed to insert project")
-        return
+def _existing_project_id() -> str | None:
+    """Return the id of an existing project with the same name, if any."""
+    try:
+        from db.client import get_projects
 
-    print(f"Inserted project {PROJECT_NAME!r} with id {project_id}")
+        for project in get_projects() or []:
+            if project.get("name") == PROJECT_NAME:
+                return str(project["id"])
+    except Exception as exc:
+        print(f"Failed to check for existing project — {exc}")
+    return None
+
+
+def seed() -> None:
+    existing_id = _existing_project_id()
+    if existing_id:
+        print(f"Project {PROJECT_NAME!r} already exists with id {existing_id}; skipping insert")
+        project_id = existing_id
+    else:
+        project_id = insert_project(PROJECT_NAME, REPO_PATH)
+        if project_id is None:
+            print("Failed to insert project")
+            return
+
+        print(f"Inserted project {PROJECT_NAME!r} with id {project_id}")
 
     notes = [
         (

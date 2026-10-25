@@ -150,10 +150,7 @@ def retrieve_recent(project_id: str, table: str, limit: int = 10) -> list[dict[s
                 text(query),
                 {"project_id": project_id, "limit": max(1, min(limit, 100))},
             )
-            return [
-                _normalize_row(dict(row._mapping), table)
-                for row in result.fetchall()
-            ]
+            return [_normalize_row(dict(row._mapping), table) for row in result.fetchall()]
     except Exception as exc:
         logger.error("retrieve_recent: failed for table %s - %s", table, exc)
         return []
@@ -207,6 +204,7 @@ def retrieve_by_vector(
 
     # Pad/truncate to match DB column dimension (Ollama 768 → DB 1024)
     from memory.embeddings import _pad_to_db_dimension
+
     query_embedding = _pad_to_db_dimension(query_embedding)
     if query_embedding is None:
         return []
@@ -219,7 +217,7 @@ def retrieve_by_vector(
             with get_session() as session:
                 if session is None:
                     continue
-                
+
                 if table not in _VECTOR_TABLES:
                     logger.warning(f"retrieve_by_vector: Table {table} has no vector column")
                     continue
@@ -227,7 +225,7 @@ def retrieve_by_vector(
                 table_meta = _VECTOR_TABLES[table]
                 embedding_col = table_meta["embedding"]
                 timestamp_col = table_meta["timestamp"]
-                
+
                 # Build and execute the vector search query
                 # noqa: S608 — table/cols validated against _VECTOR_TABLES allowlist
                 query = f"""
@@ -240,7 +238,7 @@ def retrieve_by_vector(
                     ORDER BY score ASC
                     LIMIT :top_k
                 """
-                
+
                 result = session.execute(
                     text(query),
                     {
@@ -248,19 +246,19 @@ def retrieve_by_vector(
                         "query_vec": _format_vector(query_embedding),
                         "date_from": date_from,
                         "date_to": date_to,
-                        "top_k": top_k
-                    }
+                        "top_k": top_k,
+                    },
                 )
-                
+
                 # Convert results to list of dicts
                 for row in result.fetchall():
                     row_dict = dict(row._mapping)
                     score = float(row_dict.pop("score", 1.0))
                     results.append(_normalize_row(row_dict, table, score))
-                    
+
         except Exception as exc:
             logger.error("retrieve_by_vector: failed for table %s — %s", table, exc)
-    
+
     # Re-rank results by score (lower score = more similar)
     results.sort(key=lambda x: x.get("score", 1.0))
 
@@ -269,7 +267,10 @@ def retrieve_by_vector(
     min_score = 0.85  # CockroachDB vector distance threshold; lower = more similar
     filtered = [r for r in results if float(r.get("score", 1.0)) <= min_score]
     if not filtered and results:
-        logger.debug("retrieve_by_vector: all results above min_score threshold %.2f — returning empty", min_score)
+        logger.debug(
+            "retrieve_by_vector: all results above min_score threshold %.2f — returning empty",
+            min_score,
+        )
         return []
 
     # Diversity filter: avoid flooding one table/day. Cap per table and spread across recent days.

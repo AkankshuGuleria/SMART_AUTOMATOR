@@ -35,7 +35,7 @@ const SCREEN_COMMANDS: Command[] = [
   { id: 'nav-chat',       label: 'Go to AI Chat',           group: 'Navigate', icon: MessageSquare,   screen: 'chat',      keywords: ['ask', 'agent', 'query'] },
   { id: 'nav-memory',     label: 'Open Memory Visualization', group: 'Navigate', icon: Brain,          screen: 'memory',    keywords: ['graph', 'knowledge'] },
   { id: 'nav-activity',   label: 'View Activity Feed',      group: 'Navigate', icon: Activity,        screen: 'activity',  keywords: ['feed', 'events'] },
-  { id: 'nav-resources',  label: 'Resources & Usage',       group: 'Navigate', icon: Cpu,             screen: 'resources', keywords: ['cpu', 'ram', 'time', 'usage'] },
+  { id: 'nav-resources',  label: 'Resources & Usage',       group: 'Navigate', icon: Cpu,             screen: 'resources', keywords: ['cpu', 'gpu', 'ram', 'memory usage', 'apps', 'time', 'usage', 'processes'] },
   { id: 'nav-projects',   label: 'Projects',                group: 'Navigate', icon: Folder,          screen: 'projects',  keywords: ['repo', 'workspace'] },
   { id: 'nav-restore',    label: 'Restore Workspace',       group: 'Navigate', icon: RefreshCw,       screen: 'restore',   keywords: ['recover', 'session'] },
   { id: 'nav-settings',   label: 'Settings',                group: 'Navigate', icon: Settings,        screen: 'settings',  keywords: ['config', 'preferences'] },
@@ -71,7 +71,7 @@ export default function CommandPaletteV2({ onClose, onNavigate, onChatMessage }:
       group: 'AI',
       icon: MessageSquare,
       action: () => { onChatMessage(query.trim()); onNavigate('chat'); onClose() },
-      keywords: [],
+      keywords: [query.trim().toLowerCase()],
     })
   }
 

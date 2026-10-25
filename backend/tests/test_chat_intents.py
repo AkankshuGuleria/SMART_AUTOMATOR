@@ -7,7 +7,6 @@ improved terse fallbacks in query_memory. No live LLM or DB calls.
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 from api.server import app

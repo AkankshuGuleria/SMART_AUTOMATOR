@@ -2,7 +2,8 @@
 logging_config.py — AUTOMATA centralized logging setup.
 
 Owns:    Configuring the root Python logger for the entire backend process.
-Never:   Does not write to files or external services — stdout only for now.
+Never:   Writes to external services. Logs go to stdout, or to
+         %LOCALAPPDATA%\AUTOMATA\agent.log when started without a console.
 Ref:     TECH_STACK.md → "Logging" section.
 
 Call `configure_logging()` exactly once at process startup, at the top of
@@ -32,7 +33,21 @@ def configure_logging() -> None:
         datefmt="%Y-%m-%dT%H:%M:%S",
     )
 
-    handler = logging.StreamHandler(sys.stdout)
+    if sys.stdout is not None:
+        handler: logging.Handler = logging.StreamHandler(sys.stdout)
+    else:
+        # Started hidden (pythonw / autostart): there is no console, so log to
+        # a small rotating file under the local data directory instead.
+        from logging.handlers import RotatingFileHandler
+        from pathlib import Path
+
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "AUTOMATA"
+        base.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(
+            base / "agent.log", maxBytes=2_000_000, backupCount=2, encoding="utf-8"
+        )
+        # uvicorn writes to sys.stderr/stdout directly in a few places.
+        sys.stdout = sys.stderr = open(os.devnull, "w")  # noqa: SIM115
     handler.setFormatter(formatter)
 
     root_logger = logging.getLogger()
@@ -47,6 +62,4 @@ def configure_logging() -> None:
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
-    logging.getLogger(__name__).info(
-        "Logging configured | level=%s", level_name
-    )
+    logging.getLogger(__name__).info("Logging configured | level=%s", level_name)

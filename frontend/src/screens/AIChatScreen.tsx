@@ -4,16 +4,13 @@
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Send, Sparkles, ChevronRight, Copy, Check, Zap } from 'lucide-react'
+import { Send, Sparkles, ChevronRight, Copy, Check, Zap, Loader2 } from 'lucide-react'
 import {
   sendChatMessage,
-  getToolStatus,
   approveAction,
   type ActionCard,
 } from '../lib/api'
 import AIStatusBadge from '../components/ui/AIStatusBadge'
-
-const DEMO_PROJECT_ID = '2efec7e0-92db-4591-9594-026ff8399a3c'
 
 interface Message {
   id: string
@@ -33,12 +30,22 @@ const QUICK_ACTIONS = [
   { label: 'Run tests', text: 'run tests' },
 ]
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function parseContent(text: string, id: string): React.ReactNode[] {
   const lines = text.split('\n')
   const nodes: React.ReactNode[] = []
   lines.forEach((line, i) => {
     const key = `${id}-${i}`
-    const processed = line
+    // Replies can echo captured file/terminal content, so escape before formatting.
+    const processed = escapeHtml(line)
       .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
       .replace(/`([^`]+)`/g, '<code>$1</code>')
     if (line.startsWith('• ') || line.startsWith('- ')) {
@@ -55,6 +62,20 @@ function parseContent(text: string, id: string): React.ReactNode[] {
     }
   })
   return nodes
+}
+
+function describeError(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e)
+  const match = raw.match(/-\s*(\{[\s\S]*\})\s*$/)
+  if (match) {
+    try {
+      const parsed = JSON.parse(match[1]) as { detail?: string }
+      if (parsed.detail) return parsed.detail
+    } catch {
+      return raw
+    }
+  }
+  return raw
 }
 
 function TypingDots() {
@@ -98,26 +119,27 @@ function CopyButton({ text }: { text: string }) {
 interface Props {
   projectId?: string
   onActivity?: () => void
-  onOpenProject?: (id: string) => void
+  /** A message queued from the command palette; sent once on arrival. */
+  initialMessage?: string | null
+  onInitialMessageSent?: () => void
 }
 
-export default function AIChatScreen({ projectId = DEMO_PROJECT_ID, onActivity }: Props) {
+export default function AIChatScreen({ projectId, onActivity, initialMessage, onInitialMessageSent }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [approving, setApproving] = useState<Record<string, boolean>>({})
+  const [approveError, setApproveError] = useState<Record<string, string | undefined>>({})
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, sending])
+    setMessages([])
+  }, [projectId])
 
-  const pollTool = useCallback(async () => {
-    try {
-      const s = await getToolStatus()
-      if (s.tools?.length) console.log('Tools:', s.tools)
-    } catch { /* ignore */ }
-  }, [])
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [messages, sending])
 
   const send = useCallback(async (text: string) => {
     const trimmed = text.trim()
@@ -128,29 +150,44 @@ export default function AIChatScreen({ projectId = DEMO_PROJECT_ID, onActivity }
     const userMsg: Message = { id: Date.now().toString(), role: 'user', content: trimmed, timestamp: new Date() }
     setMessages(prev => [...prev, userMsg])
     try {
-      const res = await sendChatMessage(trimmed, projectId)
+      const res = await sendChatMessage(trimmed, projectId, projectId)
       const agentMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'agent',
         content: res.reply ?? res.error ?? 'No response',
         timestamp: new Date(),
         intent: res.intent,
-        actions: [...(res.actions ?? []), ...(res.executed_actions ?? [])],
+        actions: res.actions ?? [],
         grounded: false,
       }
       setMessages(prev => [...prev, agentMsg])
-      if (res.actions?.length) pollTool()
     } catch (e) {
+      const offline = e instanceof TypeError
       setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
         role: 'agent',
-        content: 'Could not reach the backend. Make sure the backend is running (`cd backend && uv run python main.py`).',
+        content: offline
+          ? 'Could not reach the backend. Start it with `cd backend && uv run python main.py`.'
+          : `Request failed: ${describeError(e)}`,
         timestamp: new Date(),
       }])
     } finally {
       setSending(false)
     }
-  }, [sending, projectId, onActivity, pollTool])
+  }, [sending, projectId, onActivity])
+
+  const sentInitialRef = useRef<string | null>(null)
+  useEffect(() => {
+    // Ref guard: StrictMode runs effects twice in development.
+    if (!initialMessage) {
+      sentInitialRef.current = null
+    } else if (sentInitialRef.current !== initialMessage) {
+      sentInitialRef.current = initialMessage
+      onInitialMessageSent?.()
+      send(initialMessage)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMessage])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -158,6 +195,40 @@ export default function AIChatScreen({ projectId = DEMO_PROJECT_ID, onActivity }
       send(input)
     }
   }
+
+  const runAction = useCallback(async (messageId: string, actionIndex: number, action: ActionCard) => {
+    const actionKey = `${messageId}-${actionIndex}`
+    setApproving(prev => ({ ...prev, [actionKey]: true }))
+    setApproveError(prev => ({ ...prev, [actionKey]: undefined }))
+    try {
+      const result = await approveAction(
+        action.type ?? '',
+        action.params ?? {},
+        projectId,
+      )
+      if (result.executed) {
+        setMessages(previous => previous.map(candidate => (
+          candidate.id === messageId
+            ? {
+                ...candidate,
+                actions: candidate.actions?.map((pending, index) => (
+                  index === actionIndex
+                    ? { ...pending, executed: true, result: result.result as Record<string, unknown> }
+                    : pending
+                )),
+              }
+            : candidate
+        )))
+        onActivity?.()
+      } else {
+        setApproveError(prev => ({ ...prev, [actionKey]: 'Action did not complete.' }))
+      }
+    } catch (e) {
+      setApproveError(prev => ({ ...prev, [actionKey]: describeError(e) }))
+    } finally {
+      setApproving(prev => ({ ...prev, [actionKey]: false }))
+    }
+  }, [projectId, onActivity])
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', height: '100%' }}>
@@ -310,53 +381,77 @@ export default function AIChatScreen({ projectId = DEMO_PROJECT_ID, onActivity }
 
                 {msg.actions && msg.actions.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.25rem' }}>
-                    {msg.actions.map((action, i) => (
-                      <motion.div
-                        key={i}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.1 + i * 0.06, type: 'spring', stiffness: 300, damping: 26 }}
-                        style={{
-                          padding: '0.6rem 0.85rem',
-                          borderRadius: 'var(--r-md)',
-                          border: `1px solid ${action.executed ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.3)'}`,
-                          background: action.executed ? 'var(--success-muted)' : 'var(--warning-muted)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: '0.5rem',
-                        }}
-                      >
-                        <div>
-                          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: action.executed ? 'var(--success)' : 'var(--warning)' }}>
-                            {action.type ?? 'Action'}
+                    {msg.actions.map((action, i) => {
+                      const actionKey = `${msg.id}-${i}`
+                      const policy = action.policy ?? 'suggest'
+                      const needsApproval = !action.executed && (
+                        policy === 'suggest'
+                        || policy === 'confirm_once'
+                        || policy === 'require_approval'
+                      )
+                      const isApproving = approving[actionKey] ?? false
+                      const failure = approveError[actionKey]
+                      return (
+                        <motion.div
+                          key={i}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.1 + i * 0.06, type: 'spring', stiffness: 300, damping: 26 }}
+                          style={{
+                            padding: '0.6rem 0.85rem',
+                            borderRadius: 'var(--r-md)',
+                            border: `1px solid ${action.executed ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.3)'}`,
+                            background: action.executed ? 'var(--success-muted)' : 'var(--warning-muted)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '0.5rem',
+                          }}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: action.executed ? 'var(--success)' : 'var(--warning)' }}>
+                              {action.type ?? 'Action'}
+                            </div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginTop: 1 }}>
+                              {action.policy ?? (action.executed ? 'Executed' : 'Pending approval')}
+                            </div>
+                            {failure && (
+                              <div style={{ fontSize: '0.68rem', color: 'var(--warning)', marginTop: 2 }}>
+                                {failure}
+                              </div>
+                            )}
                           </div>
-                          <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginTop: 1 }}>
-                            {action.policy ?? (action.executed ? 'Executed' : 'Pending approval')}
-                          </div>
-                        </div>
-                        {!action.executed && (
-                          <motion.button
-                            onClick={() => approveAction(action.type ?? '', {}, projectId).catch(() => {})}
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            style={{
-                              padding: '0.3rem 0.7rem',
-                              borderRadius: 'var(--r-sm)',
-                              border: '1px solid rgba(245,158,11,0.4)',
-                              background: 'var(--warning-muted)',
-                              color: 'var(--warning)',
-                              fontSize: '0.72rem',
-                              fontWeight: 600,
-                              cursor: 'pointer',
-                              display: 'flex', alignItems: 'center', gap: 4,
-                            }}
-                          >
-                            <Zap size={11} /> Run
-                          </motion.button>
-                        )}
-                      </motion.div>
-                    ))}
+                          {needsApproval && (
+                            <motion.button
+                              id={`action-execute-${msg.id}-${i}`}
+                              onClick={() => runAction(msg.id, i, action)}
+                              disabled={isApproving}
+                              whileHover={isApproving ? undefined : { scale: 1.05 }}
+                              whileTap={isApproving ? undefined : { scale: 0.95 }}
+                              style={{
+                                padding: '0.3rem 0.7rem',
+                                borderRadius: 'var(--r-sm)',
+                                border: '1px solid var(--accent)',
+                                background: 'var(--accent)',
+                                color: 'white',
+                                fontSize: '0.72rem',
+                                fontWeight: 600,
+                                cursor: isApproving ? 'wait' : 'pointer',
+                                opacity: isApproving ? 0.7 : 1,
+                                display: 'flex', alignItems: 'center', gap: 4,
+                                flexShrink: 0,
+                                transition: 'background var(--dur-fast) var(--ease-in-out)',
+                              }}
+                            >
+                              {isApproving
+                                ? <motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.9, ease: 'linear' }} style={{ display: 'inline-flex' }}><Loader2 size={11} /></motion.span>
+                                : <Zap size={11} />}
+                              {isApproving ? 'Executing…' : 'Execute'}
+                            </motion.button>
+                          )}
+                        </motion.div>
+                      )
+                    })}
                   </div>
                 )}
               </div>

@@ -67,31 +67,32 @@ def _ocr_with_powershell(image_path: str) -> str:
     """
     try:
         script = (
-            f'Add-Type -AssemblyName System.Windows.Forms; '
-            f'Add-Type -AssemblyName System.Drawing; '
+            f"Add-Type -AssemblyName System.Windows.Forms; "
+            f"Add-Type -AssemblyName System.Drawing; "
             f'$img = [System.Drawing.Image]::FromFile("{image_path}"); '
-            f'$clipboard = [System.Windows.Forms.Clipboard]; '
-            f'$clipboard.SetImage($img); '
-            f'Start-Sleep -Milliseconds 500; '
-            f'Add-Type -AssemblyName Windows.Media.Ocr; '
-            f'$ocrEngine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage('
+            f"$clipboard = [System.Windows.Forms.Clipboard]; "
+            f"$clipboard.SetImage($img); "
+            f"Start-Sleep -Milliseconds 500; "
+            f"Add-Type -AssemblyName Windows.Media.Ocr; "
+            f"$ocrEngine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage("
             f'  [Windows.Globalization.Language]::new("en-US")); '
             f'if ($null -eq $ocrEngine) {{ Write-Output "ocr_unavailable"; exit }} '
-            f'$bitmap = [Windows.Graphics.Imaging.SoftwareBitmap]::CreateCopyFromBuffer('
-            f'  [Windows.Graphics.Imaging.BitmapDecoder]::Create('
+            f"$bitmap = [Windows.Graphics.Imaging.SoftwareBitmap]::CreateCopyFromBuffer("
+            f"  [Windows.Graphics.Imaging.BitmapDecoder]::Create("
             f'    [System.IO.File]::OpenRead("{image_path}"), '
-            f'    [Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8, '
-            f'    [Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied), '
-            f'  [Windows.Graphics.Imaging.BitmapBufferAccessMode]::Read); '
-            f'$result = $ocrEngine.RecognizeAsync($bitmap); '
+            f"    [Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8, "
+            f"    [Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied), "
+            f"  [Windows.Graphics.Imaging.BitmapBufferAccessMode]::Read); "
+            f"$result = $ocrEngine.RecognizeAsync($bitmap); "
             f'$text = ""; '
-            f'foreach ($line in $result.Lines) {{ '
+            f"foreach ($line in $result.Lines) {{ "
             f'  foreach ($word in $line.Words) {{ $text += $word.Text + " " }}; '
             f'  $text += "`n" '
-            f'}}; '
-            f'$text.Trim()'
+            f"}}; "
+            f"$text.Trim()"
         )
         import subprocess
+
         completed = subprocess.run(
             ["powershell", "-NoProfile", "-Command", script],
             shell=False,

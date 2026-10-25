@@ -19,7 +19,6 @@ import logging
 import re
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import Any
 
 from decision_engine.tools import execute_tool, get_tool
@@ -32,6 +31,7 @@ MAX_TOOL_CALLS: int = 10
 
 
 # ─── Result types ─────────────────────────────────────────────────────────────
+
 
 @dataclass
 class StepResult:
@@ -56,6 +56,7 @@ class OrchestratorResult:
 
 
 # ─── Main entry point ─────────────────────────────────────────────────────────
+
 
 def run_orchestrator(
     goal: str,
@@ -228,6 +229,7 @@ def run_orchestrator(
 
 # ─── Context retrieval ────────────────────────────────────────────────────────
 
+
 def _retrieve_memories(goal: str, project_id: str | None) -> list[dict[str, Any]]:
     """Pull relevant memories from vector search + recent retrieval."""
     memories: list[dict[str, Any]] = []
@@ -235,6 +237,7 @@ def _retrieve_memories(goal: str, project_id: str | None) -> list[dict[str, Any]
         return memories
     try:
         from memory.retrieval import retrieve_by_vector, retrieve_recent
+
         vector_tables = ["commits", "todos", "architecture_notes", "decision_log", "mistake_log"]
         memories = retrieve_by_vector(goal, vector_tables, project_id=project_id, top_k=8)
         if not memories:
@@ -252,6 +255,7 @@ def _retrieve_mistakes(project_id: str | None, goal: str) -> list[dict[str, Any]
         return mistakes
     try:
         from db.client import get_mistakes
+
         mistakes = get_mistakes(project_id) or []
     except Exception as exc:
         logger.warning("_retrieve_mistakes failed — %s", exc)
@@ -262,9 +266,11 @@ def _get_filtered_tool_descriptions() -> list[dict[str, Any]]:
     """Return descriptions for tools whose config requirements are met."""
     try:
         from decision_engine.tools import filter_tools_by_config
+
         tools = filter_tools_by_config()
     except Exception:
         from decision_engine.tools import get_available_tools
+
         tools = get_available_tools()
     return [
         {
@@ -297,15 +303,15 @@ def _call_planner(
     context: dict[str, Any],
 ) -> str | None:
     """Ask the reasoning model for a structured plan. Returns raw text or None."""
-    memory_summary = "\n".join(
-        f"- [{m.get('table', 'unknown')}] {m.get('content', '')}"
-        for m in memories[:12]
-    ) or "(no relevant memory found)"
+    memory_summary = (
+        "\n".join(f"- [{m.get('table', 'unknown')}] {m.get('content', '')}" for m in memories[:12])
+        or "(no relevant memory found)"
+    )
 
-    mistake_summary = "\n".join(
-        f"- {m.get('symptom', '')}: {m.get('fix', '')}"
-        for m in mistakes[:5]
-    ) or "(no recorded mistakes)"
+    mistake_summary = (
+        "\n".join(f"- {m.get('symptom', '')}: {m.get('fix', '')}" for m in mistakes[:5])
+        or "(no recorded mistakes)"
+    )
 
     tools_json = json.dumps(available_tools, default=str, indent=2)[:4000]
 
@@ -343,7 +349,7 @@ def _call_reflector(
     context: dict[str, Any],
 ) -> str | None:
     """Ask the reasoning model how to proceed after an observation."""
-    remaining = plan_steps[step_index + 1: step_index + 4]  # show a window
+    remaining = plan_steps[step_index + 1 : step_index + 4]  # show a window
     last_step = plan_steps[step_index] if step_index < len(plan_steps) else {}
 
     user_message = (
@@ -399,7 +405,9 @@ def _invoke_structured(system_prompt: str, user_message: str, retries: int = 2) 
         parsed = _extract_json(text)
         if parsed is not None:
             return text
-        logger.warning("_invoke_structured: parse failed on attempt %d — %s", attempt + 1, text[:200])
+        logger.warning(
+            "_invoke_structured: parse failed on attempt %d — %s", attempt + 1, text[:200]
+        )
         user_message = (
             "The previous response could not be parsed as JSON. "
             "Return ONLY valid JSON, no markdown fences, no extra text.\n\n" + user_message
@@ -423,7 +431,9 @@ def _call_with_timeout(fn, **kwargs) -> Any:
     t = threading.Thread(target=_target, daemon=True)
     t.start()
     if not done.wait(timeout=_LLM_CALL_TIMEOUT):
-        logger.warning("_call_with_timeout: %s timed out after %.1fs", fn.__name__, _LLM_CALL_TIMEOUT)
+        logger.warning(
+            "_call_with_timeout: %s timed out after %.1fs", fn.__name__, _LLM_CALL_TIMEOUT
+        )
         return None
     if "error" in result_box:
         logger.warning("_call_with_timeout: %s raised — %s", fn.__name__, result_box["error"])
@@ -498,11 +508,13 @@ def _parse_plan(text: str | None) -> list[dict[str, Any]]:
         if tool is None:
             logger.warning("_parse_plan: LLM proposed unknown tool '%s' — skipping", tool_name)
             continue
-        normalized.append({
-            "tool": tool_name,
-            "params": step.get("params") or {},
-            "reasoning": str(step.get("reasoning", ""))[:500],
-        })
+        normalized.append(
+            {
+                "tool": tool_name,
+                "params": step.get("params") or {},
+                "reasoning": str(step.get("reasoning", ""))[:500],
+            }
+        )
     return normalized
 
 
@@ -517,6 +529,7 @@ def _parse_reflection(text: str | None) -> dict[str, Any]:
 
 
 # ─── Response builders ────────────────────────────────────────────────────────
+
 
 def _build_success_response(goal: str, steps: list[StepResult]) -> str:
     """Build a concise success message from executed steps."""
@@ -543,20 +556,22 @@ def _fallback_answer(goal: str, memories: list[dict[str, Any]]) -> str:
         if m.get("content")
     )
     return (
-        "Planning is currently unavailable. Here is the most relevant memory I found:\n\n"
-        f"{bullets}"
+        f"Planning is currently unavailable. Here is the most relevant memory I found:\n\n{bullets}"
     )
 
 
 # ─── Decision / mistake logging ───────────────────────────────────────────────
 
+
 def _record_decision(project_id: str | None, decision: str, rationale: str) -> str | None:
     """Insert a decision_log row with embedding. Returns the new decision UUID or None."""
     try:
         from agent_actions import record_agent_decision
+
         if project_id:
             record_agent_decision(project_id, decision, rationale)
         from db.client import insert_decision
+
         return insert_decision(project_id, decision, rationale)
     except Exception as exc:
         logger.warning("_record_decision failed — %s", exc)
@@ -572,9 +587,11 @@ def _record_mistake(
     """Insert a mistake_log row with embedding. Returns the new mistake UUID or None."""
     try:
         from agent_actions import record_agent_mistake
+
         if project_id:
             record_agent_mistake(project_id, symptom, root_cause, fix)
         from db.client import insert_mistake
+
         return insert_mistake(project_id, symptom, root_cause, fix, module="decision_engine")
     except Exception as exc:
         logger.warning("_record_mistake failed — %s", exc)

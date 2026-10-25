@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +39,7 @@ from workflow_engine.checkpoint_store import (
 from workflow_engine.context import (
     ExecutionContext,
     check_privacy_guardrail,
-    redact_content,
+    redact_inputs,
     resolve_template,
 )
 from workflow_engine.gate_resolver import resolve_gates
@@ -76,7 +76,7 @@ class WorkflowExecutor:
             raise ValueError(f"Unknown workflow: {workflow_id}")
 
         run_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         # Persist to DB
         try:
@@ -144,10 +144,17 @@ class WorkflowExecutor:
         # Find the index of the last checkpointed step, continue from next
         gate_set = set()
         resume_from = 0
+        found = False
         for i, step_def in enumerate(definition.steps):
             if step_def.id == step_id:
                 resume_from = i if is_gate_checkpoint else i + 1
+                found = True
                 break
+        if not found:
+            raise ValueError(
+                f"Checkpoint step {step_id!r} not found in workflow definition {definition.id}; "
+                "refusing to resume from the start"
+            )
 
         # Resolve gates again
         gates = resolve_gates(definition.steps, self._tools_by_name)
@@ -177,7 +184,7 @@ class WorkflowExecutor:
         if db_steps:
             for db_step in db_steps:
                 if db_step.get("status") == "waiting_for_approval":
-                    now = datetime.now(timezone.utc).isoformat()
+                    now = datetime.now(UTC).isoformat()
                     update_workflow_step(
                         db_step["id"],
                         status="approved",
@@ -207,12 +214,21 @@ class WorkflowExecutor:
 
         # Find resume position from checkpoint
         resume_from = 0
+        found = False
         for i, step_def in enumerate(definition.steps):
             if step_def.id == step_id:
                 resume_from = i if is_gate_checkpoint else i + 1
+                found = True
                 break
+        if not found:
+            raise ValueError(
+                f"Checkpoint step {step_id!r} not found in workflow definition {definition.id}; "
+                "refusing to resume from the start"
+            )
 
-        self._execute_steps_from(definition, run, gate_set, context, resume_from, skip_gate_at=resume_from)
+        self._execute_steps_from(
+            definition, run, gate_set, context, resume_from, skip_gate_at=resume_from
+        )
 
         return run
 
@@ -225,7 +241,7 @@ class WorkflowExecutor:
             raise ValueError(f"Run {run_id} not found in DB")
 
         run.status = "cancelled"
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         try:
             update_workflow_run_status(run_id, "cancelled", now)
         except Exception as exc:
@@ -252,7 +268,7 @@ class WorkflowExecutor:
             raise ValueError(f"Run {run_id} not found in DB")
 
         run.status = "cancelled"
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         try:
             update_workflow_run_status(run_id, "cancelled", now)
         except Exception as exc:
@@ -274,9 +290,7 @@ class WorkflowExecutor:
         """Get a workflow run by ID."""
         return self._reconstruct_run_from_db(run_id)
 
-    def list_runs(
-        self, project_id: str, status: str | None = None
-    ) -> list[WorkflowRun]:
+    def list_runs(self, project_id: str, status: str | None = None) -> list[WorkflowRun]:
         """List workflow runs for a project."""
         try:
             rows = get_workflow_runs(project_id, status)
@@ -362,7 +376,9 @@ class WorkflowExecutor:
                 run.status = "awaiting_approval"
                 logger.info(
                     "workflow_executor: paused at gate | run=%s step_index=%d tool=%s",
-                    run.id, i, step_def.tool,
+                    run.id,
+                    i,
+                    step_def.tool,
                 )
                 rendered_inputs = self._render_inputs(step_def, context)
                 try:
@@ -386,9 +402,11 @@ class WorkflowExecutor:
                 return
 
             self._execute_step(step_def, run, context, definition)
+            if run.status == "failed":
+                return
 
         run.status = "completed"
-        run.completed_at = datetime.now(timezone.utc).isoformat()
+        run.completed_at = datetime.now(UTC).isoformat()
         try:
             update_workflow_run_status(run.id, "completed", run.completed_at)
         except Exception as exc:
@@ -405,10 +423,16 @@ class WorkflowExecutor:
         rendered_inputs: dict[str, Any] = {}
         for key, value in step_def.inputs.items():
             if isinstance(value, str) and "{{" in value:
-                rendered_inputs[key] = resolve_template(value, {
-                    "inputs": context.inputs,
-                    "step_outputs": context.step_outputs,
-                })
+                try:
+                    rendered_inputs[key] = resolve_template(
+                        value,
+                        {
+                            "inputs": context.inputs,
+                            "step_outputs": context.step_outputs,
+                        },
+                    )
+                except Exception:
+                    rendered_inputs[key] = ""
             else:
                 rendered_inputs[key] = value
         return rendered_inputs
@@ -427,6 +451,10 @@ class WorkflowExecutor:
         # Determine policy from tool registry
         policy = self._policy_for_tool(tool_name)
 
+        # Resolve templated inputs before persisting so the step row
+        # records what was actually rendered.
+        rendered_inputs = self._render_inputs(step_def, context)
+
         # Insert step into DB
         step_db_id = None
         try:
@@ -435,7 +463,7 @@ class WorkflowExecutor:
                 step_def_id=step_def.id,
                 tool=tool_name,
                 policy=policy,
-                rendered_inputs_json=None,
+                rendered_inputs_json=json.dumps(rendered_inputs),
                 output_json=None,
                 redactions_json=None,
             )
@@ -443,7 +471,12 @@ class WorkflowExecutor:
             logger.warning("workflow_executor: insert_workflow_step failed — %s", exc)
 
         if tool is None:
-            logger.error("workflow_executor: unknown tool | run=%s step=%s tool=%s", run.id, step_def.id, tool_name)
+            logger.error(
+                "workflow_executor: unknown tool | run=%s step=%s tool=%s",
+                run.id,
+                step_def.id,
+                tool_name,
+            )
             if step_db_id:
                 try:
                     update_workflow_step(step_db_id, status="failed")
@@ -465,25 +498,40 @@ class WorkflowExecutor:
                 return
             return
 
-        # Resolve templated inputs
-        rendered_inputs = self._render_inputs(step_def, context)
-
         # Check privacy guardrail on rendered inputs
         input_text = str(rendered_inputs)
         if check_privacy_guardrail(input_text):
-            redacted, was_redacted = redact_content(input_text)
+            rendered_inputs, was_redacted = redact_inputs(rendered_inputs)
             if was_redacted:
-                context.redactions.append({
-                    "step_id": step_def.id,
-                    "tool": tool_name,
-                    "redacted_at": datetime.now(timezone.utc).isoformat(),
-                })
-                rendered_inputs = {"text": redacted}
-
+                context.redactions.append(
+                    {
+                        "step_id": step_def.id,
+                        "tool": tool_name,
+                        "redacted_at": datetime.now(UTC).isoformat(),
+                    }
+                )
         # Execute the tool
         try:
             result = execute_tool(tool_name, rendered_inputs)
             context.step_outputs[step_def.id] = result
+
+            if not result.get("success", False):
+                if step_db_id:
+                    try:
+                        update_workflow_step(
+                            step_db_id,
+                            status="failed",
+                            output_json=json.dumps(result, default=str),
+                        )
+                    except Exception:
+                        pass
+                if step_def.on_error == "abort":
+                    run.status = "failed"
+                    try:
+                        update_workflow_run_status(run.id, "failed")
+                    except Exception:
+                        pass
+                return
 
             # Update step as succeeded
             output_json = None
@@ -493,7 +541,7 @@ class WorkflowExecutor:
                 output_json = json.dumps({"raw": str(result)})
             if step_db_id:
                 try:
-                    now = datetime.now(timezone.utc).isoformat()
+                    now = datetime.now(UTC).isoformat()
                     update_workflow_step(
                         step_db_id,
                         status="succeeded",
@@ -516,10 +564,12 @@ class WorkflowExecutor:
             save_checkpoint(run.id, step_def.id, context)
 
         except Exception as exc:
-            logger.error("workflow_executor: step failed | run=%s step=%s error=%s", run.id, step_def.id, exc)
+            logger.error(
+                "workflow_executor: step failed | run=%s step=%s error=%s", run.id, step_def.id, exc
+            )
             if step_db_id:
                 try:
-                    now = datetime.now(timezone.utc).isoformat()
+                    now = datetime.now(UTC).isoformat()
                     update_workflow_step(step_db_id, status="failed", completed_at=now)
                 except Exception:
                     pass

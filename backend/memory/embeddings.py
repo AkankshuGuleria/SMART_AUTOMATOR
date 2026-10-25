@@ -35,6 +35,7 @@ def _pad_to_db_dimension(vector: list[float] | None) -> list[float] | None:
         return None
 
     from config import settings
+
     target_dim = settings.embedding_dimension
     if target_dim <= 0 or len(vector) == target_dim:
         return vector
@@ -108,4 +109,3 @@ def generate_embedding_for_capture(text: str, max_length: int = 500) -> str | No
     truncated = text[:max_length]
     vector = generate_embedding(truncated)
     return format_vector(vector)
-

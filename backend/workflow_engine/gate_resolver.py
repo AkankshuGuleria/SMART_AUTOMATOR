@@ -32,10 +32,12 @@ def resolve_gates(
 
     Composition rule (from WORKFLOW_ENGINE.md §2):
     A workflow pauses at a gate immediately before the first step in a
-    contiguous sequence whose policy is confirm_once or require_approval,
-    and does not resume automatically past it. Once approved, execution
-    continues through any immediately-following steps of the same or lower
-    risk tier without additional prompts, until the next tier increase.
+    contiguous sequence whose policy is confirm_once or require_approval.
+    Each separate contiguous run of gated steps gets its own gate.
+    Steps with policy "auto_execute" break contiguity, so a later gated
+    step after an auto_execute step always gets a fresh gate — an
+    earlier approval never authorizes a later, non-contiguous
+    require_approval action.
 
     Risk tiers (ascending):
       auto_execute  <  confirm_once  <  require_approval
@@ -51,25 +53,23 @@ def resolve_gates(
         policy = _policy_for(tool)
 
         if policy in ("confirm_once", "require_approval"):
+            # Gate before the first step of this contiguous gated block.
             gates.append(i)
             i += 1
             # After approval, continue through same or lower risk tiers.
-            # Stop when we hit a higher risk tier.
+            # Stop when we hit auto_execute (breaks contiguity) or a
+            # higher tier (which needs its own approval).
             while i < len(steps):
                 next_tool = tool_registry.get(steps[i].tool)
                 next_policy = _policy_for(next_tool)
                 if next_policy == "auto_execute":
-                    # Lower tier — continue
-                    i += 1
+                    break  # auto breaks contiguity — new gate needed
                 elif next_policy == policy:
-                    # Same tier — continue
-                    i += 1
+                    i += 1  # same tier — continue
                 elif next_policy == "confirm_once" and policy == "require_approval":
-                    # Lower tier (confirm_once < require_approval) — continue
-                    i += 1
+                    i += 1  # lower tier — continue
                 elif next_policy == "require_approval" and policy == "confirm_once":
-                    # Higher tier — stop and place new gate
-                    break
+                    break  # higher tier — new gate needed
                 else:
                     i += 1
         else:

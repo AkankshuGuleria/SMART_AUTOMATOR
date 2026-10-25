@@ -233,9 +233,9 @@ export default function FloatingSidebar({
                   outline: 'none',
                 }}
               >
-                <option value="auto">Auto (Ollama → Cloud)</option>
+                <option value="auto">Auto (Cloud → Local)</option>
                 <option value="local">Local only</option>
-                <option value="cloud">Cloud (Bedrock)</option>
+                <option value="cloud">Cloud only</option>
               </select>
             </motion.div>
           )}

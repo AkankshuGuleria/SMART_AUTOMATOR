@@ -6,12 +6,13 @@ from db.client import get_session
 
 logging.basicConfig(level=logging.INFO)
 
+
 def main():
     with get_session() as session:
         if session is None:
             print("DB is not configured or unavailable")
             return
-        
+
         # Get projects
         projects = session.execute(
             text("SELECT id, name, repo_path, remote_url FROM projects")
@@ -19,7 +20,7 @@ def main():
         print("Projects in database:")
         for p in projects:
             print(f"  - ID: {p[0]} | Name: {p[1]} | Path: {p[2]} | URL: {p[3]}")
-            
+
         # Get sessions
         sessions = session.execute(
             text("SELECT id, project_id, started_at, ended_at FROM sessions")
@@ -33,6 +34,7 @@ def main():
         for table in _ALLOWED_TABLES:
             count = session.execute(text("SELECT COUNT(*) FROM " + table)).scalar()  # noqa: S608
             print(f"Total {table}: {count}")
+
 
 if __name__ == "__main__":
     # Test comment version 2 to trigger file watcher

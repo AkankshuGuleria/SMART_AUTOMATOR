@@ -10,9 +10,6 @@ Ref:     ARCHITECTURE.md §3.2c, FEATURES_PHASE.md §9 (Visual Feedback Layer).
 """
 
 import logging
-import os
-import tempfile
-from datetime import datetime
 
 from automation.os_windows import capture_screen
 
