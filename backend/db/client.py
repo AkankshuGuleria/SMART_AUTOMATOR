@@ -21,7 +21,7 @@ import logging
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import create_engine, text
@@ -125,78 +125,118 @@ def health_check() -> dict:
 
 # ─── Projects CRUD ───────────────────────────────────────────────────────────
 
+
 def insert_project(name: str, repo_path: str, remote_url: str | None = None) -> str | None:
-    """Insert a new project. Returns the project UUID or None on failure."""
+    """Insert a project in CockroachDB and the local store; local-only when offline.
+
+    Returns the project id. When the cloud DB is unreachable the project is
+    created locally (source='local') so the workspace keeps working offline.
+    """
     from sqlalchemy import text
 
     from db.client import get_session
+    from memory.local_store import get_store
 
     with get_session() as session:
-        if session is None:
-            return None
-        try:
-            result = session.execute(
-                text(
-                    "INSERT INTO projects (name, repo_path, remote_url) "
-                    "VALUES (:name, :repo_path, :remote_url) "
-                    "RETURNING id"
-                ),
-                {"name": name, "repo_path": repo_path, "remote_url": remote_url},
-            )
-            row = result.fetchone()
-            return str(row[0]) if row else None
-        except Exception as exc:
-            logger.error("db/client: insert_project failed — %s", exc)
-            return None
+        if session is not None:
+            try:
+                result = session.execute(
+                    text(
+                        "INSERT INTO projects (name, repo_path, remote_url) "
+                        "VALUES (:name, :repo_path, :remote_url) "
+                        "RETURNING id"
+                    ),
+                    {"name": name, "repo_path": repo_path, "remote_url": remote_url},
+                )
+                row = result.fetchone()
+                if row:
+                    pid = str(row[0])
+                    get_store().upsert_project(
+                        {"id": pid, "name": name, "repo_path": repo_path, "remote_url": remote_url},
+                        source="cloud",
+                    )
+                    return pid
+            except Exception as exc:
+                logger.error("db/client: insert_project failed — %s", exc)
+    try:
+        project = get_store().upsert_project(
+            {"name": name, "repo_path": repo_path, "remote_url": remote_url}, source="local"
+        )
+        logger.info("db/client: project stored locally (cloud DB unavailable) | %s", project["id"])
+        return str(project["id"])
+    except Exception as exc:
+        logger.error("db/client: local insert_project failed — %s", exc)
+        return None
 
 
 def get_projects() -> list[dict]:
-    """Return all projects."""
+    """All projects: cloud rows (mirrored locally) plus local-only projects.
+
+    Falls back to the local store when CockroachDB is unreachable.
+    """
     from sqlalchemy import text
 
     from db.client import get_session
+    from memory.local_store import get_store
 
+    cloud: list[dict] | None = None
     with get_session() as session:
-        if session is None:
-            return []
-        try:
-            result = session.execute(
-                text(
-                    "SELECT id, name, repo_path, remote_url, created_at "
-                    "FROM projects ORDER BY created_at DESC"
+        if session is not None:
+            try:
+                result = session.execute(
+                    text(
+                        "SELECT id, name, repo_path, remote_url, created_at "
+                        "FROM projects ORDER BY created_at DESC"
+                    )
                 )
-            )
-            return [dict(row._mapping) for row in result.fetchall()]
-        except Exception as exc:
-            logger.error("db/client: get_projects failed — %s", exc)
-            return []
+                cloud = [dict(row._mapping) for row in result.fetchall()]
+            except Exception as exc:
+                logger.error("db/client: get_projects failed — %s", exc)
+    try:
+        store = get_store()
+        if cloud is None:
+            return store.list_projects()
+        for project in cloud:
+            store.upsert_project(project, source="cloud")
+        cloud_ids = {str(p["id"]) for p in cloud}
+        local_only = [p for p in store.list_projects() if p["source"] == "local" and p["id"] not in cloud_ids]
+        return cloud + local_only
+    except Exception as exc:
+        logger.warning("db/client: local project store unavailable — %s", exc)
+        return cloud or []
 
 
 def get_project(project_id: str) -> dict | None:
-    """Return a single project by ID."""
+    """Return a single project by id (cloud first, then the local store)."""
     from sqlalchemy import text
 
     from db.client import get_session
 
     with get_session() as session:
-        if session is None:
-            return None
-        try:
-            result = session.execute(
-                text(
-                    "SELECT id, name, repo_path, remote_url, created_at "
-                    "FROM projects WHERE id = :id"
-                ),
-                {"id": project_id},
-            )
-            row = result.fetchone()
-            return dict(row._mapping) if row else None
-        except Exception as exc:
-            logger.error("db/client: get_project failed — %s", exc)
-            return None
+        if session is not None:
+            try:
+                result = session.execute(
+                    text(
+                        "SELECT id, name, repo_path, remote_url, created_at "
+                        "FROM projects WHERE id = :id"
+                    ),
+                    {"id": project_id},
+                )
+                row = result.fetchone()
+                if row:
+                    return dict(row._mapping)
+            except Exception as exc:
+                logger.error("db/client: get_project failed — %s", exc)
+    try:
+        from memory.local_store import get_store
+
+        return get_store().get_project(str(project_id))
+    except Exception:
+        return None
 
 
 # ─── Sessions CRUD ───────────────────────────────────────────────────────────
+
 
 def insert_session(project_id: str) -> str | None:
     """Start a new session for a project. Returns the session UUID or None."""
@@ -209,10 +249,7 @@ def insert_session(project_id: str) -> str | None:
             return None
         try:
             result = session.execute(
-                text(
-                    "INSERT INTO sessions (project_id) VALUES (:project_id) "
-                    "RETURNING id"
-                ),
+                text("INSERT INTO sessions (project_id) VALUES (:project_id) RETURNING id"),
                 {"project_id": project_id},
             )
             row = result.fetchone()
@@ -222,7 +259,12 @@ def insert_session(project_id: str) -> str | None:
             return None
 
 
-def end_session(project_id: str, session_id: str, summary: str | None = None, summary_embedding: str | None = None) -> bool:
+def end_session(
+    project_id: str,
+    session_id: str,
+    summary: str | None = None,
+    summary_embedding: str | None = None,
+) -> bool:
     """End a session by setting ended_at and optionally a summary.
 
     After a successful update, fires the Decision Engine on_session_end trigger
@@ -242,19 +284,22 @@ def end_session(project_id: str, session_id: str, summary: str | None = None, su
                     "UPDATE sessions SET ended_at = now(), summary = :summary, summary_embedding = :summary_embedding "
                     "WHERE id = :session_id AND ended_at IS NULL"
                 ),
-                {"project_id": project_id, "session_id": session_id, "summary": summary, "summary_embedding": summary_embedding},
+                {
+                    "session_id": session_id,
+                    "summary": summary,
+                    "summary_embedding": summary_embedding,
+                },
             )
         except Exception as exc:
             logger.error("db/client: end_session failed — %s", exc)
             return False
 
     from decision_engine.triggers import on_session_end
+
     try:
         on_session_end(project_id, session_id)
     except Exception as exc:
-        logger.warning(
-            "db/client: on_session_end trigger failed — %s", exc
-        )
+        logger.warning("db/client: on_session_end trigger failed — %s", exc)
 
     return True
 
@@ -284,6 +329,7 @@ def get_active_session(project_id: str) -> dict | None:
 
 
 # ─── Commits CRUD ────────────────────────────────────────────────────────────
+
 
 def insert_commit(
     project_id: str,
@@ -352,6 +398,7 @@ def get_commits(project_id: str, limit: int = 20) -> list[dict]:
 
 # ─── File Edits CRUD ─────────────────────────────────────────────────────────
 
+
 def insert_file_edit(
     project_id: str,
     session_id: str | None,
@@ -379,7 +426,6 @@ def insert_file_edit(
                     "change_summary": change_summary,
                 },
             )
-            session.commit()
             return True
         except Exception as exc:
             session.rollback()
@@ -412,6 +458,7 @@ def get_file_edits(project_id: str, limit: int = 20) -> list[dict]:
 
 
 # ─── Terminal Commands CRUD ──────────────────────────────────────────────────
+
 
 def insert_terminal_command(
     project_id: str,
@@ -476,6 +523,7 @@ def get_terminal_commands(project_id: str, limit: int = 20) -> list[dict]:
 
 
 # ─── TODOs CRUD ──────────────────────────────────────────────────────────────
+
 
 def insert_todo(
     project_id: str,
@@ -551,7 +599,7 @@ def get_todos(project_id: str, status: str | None = None) -> list[dict]:
 
 
 def update_todo_status(todo_id: str, status: str) -> bool:
-    """Update a TODO's status."""
+    """Update a TODO's status. Sets resolved_at only when resolved/done."""
     from sqlalchemy import text
 
     from db.client import get_session
@@ -560,13 +608,22 @@ def update_todo_status(todo_id: str, status: str) -> bool:
         if session is None:
             return False
         try:
-            session.execute(
-                text(
-                    "UPDATE todos SET status = :status, resolved_at = now() "
-                    "WHERE id = :todo_id AND status != :status"
-                ),
-                {"todo_id": todo_id, "status": status},
-            )
+            if status in ("done", "resolved"):
+                session.execute(
+                    text(
+                        "UPDATE todos SET status = :status, resolved_at = now() "
+                        "WHERE id = :todo_id AND status != :status"
+                    ),
+                    {"todo_id": todo_id, "status": status},
+                )
+            else:
+                session.execute(
+                    text(
+                        "UPDATE todos SET status = :status "
+                        "WHERE id = :todo_id AND status != :status"
+                    ),
+                    {"todo_id": todo_id, "status": status},
+                )
             return True
         except Exception as exc:
             logger.error("db/client: update_todo_status failed — %s", exc)
@@ -584,10 +641,7 @@ def update_todo_description(todo_id: str, description: str) -> bool:
             return False
         try:
             session.execute(
-                text(
-                    "UPDATE todos SET description = :description "
-                    "WHERE id = :todo_id"
-                ),
+                text("UPDATE todos SET description = :description WHERE id = :todo_id"),
                 {"todo_id": todo_id, "description": description},
             )
             return True
@@ -597,6 +651,7 @@ def update_todo_description(todo_id: str, description: str) -> bool:
 
 
 # ─── Architecture Notes CRUD ─────────────────────────────────────────────────
+
 
 def insert_architecture_note(
     project_id: str,
@@ -619,7 +674,12 @@ def insert_architecture_note(
                     "VALUES (:project_id, :title, :content, :content_embedding) "
                     "RETURNING id"
                 ),
-                {"project_id": project_id, "title": title, "content": content, "content_embedding": content_embedding},
+                {
+                    "project_id": project_id,
+                    "title": title,
+                    "content": content,
+                    "content_embedding": content_embedding,
+                },
             )
             row = result.fetchone()
             return str(row[0]) if row else None
@@ -653,6 +713,7 @@ def get_architecture_notes(project_id: str) -> list[dict]:
 
 
 # ─── Daily Briefs CRUD ───────────────────────────────────────────────────────
+
 
 def upsert_daily_brief(
     project_id: str,
@@ -736,6 +797,7 @@ def get_daily_brief(project_id: str, brief_date: str | None = None) -> dict | No
 
 # ─── Taste Preferences CRUD ──────────────────────────────────────────────────
 
+
 def insert_taste_preference(
     developer_id: str,
     category: str,
@@ -800,6 +862,7 @@ def get_taste_preferences(developer_id: str) -> list[dict]:
 
 
 # ─── Credential Refs CRUD ────────────────────────────────────────────────────
+
 
 def insert_credential_ref(
     project_id: str | None,
@@ -870,6 +933,7 @@ def get_credential_refs(project_id: str | None = None) -> list[dict]:
 
 # ─── Decision Log CRUD ───────────────────────────────────────────────────────
 
+
 def insert_decision(
     project_id: str | None,
     decision: str,
@@ -891,7 +955,12 @@ def insert_decision(
                     "VALUES (:project_id, :decision, :rationale, :rationale_embedding) "
                     "RETURNING id"
                 ),
-                {"project_id": project_id, "decision": decision, "rationale": rationale, "rationale_embedding": rationale_embedding},
+                {
+                    "project_id": project_id,
+                    "decision": decision,
+                    "rationale": rationale,
+                    "rationale_embedding": rationale_embedding,
+                },
             )
             row = result.fetchone()
             return str(row[0]) if row else None
@@ -934,6 +1003,7 @@ def get_decisions(project_id: str | None = None, limit: int = 20) -> list[dict]:
 
 
 # ─── Mistake Log CRUD ────────────────────────────────────────────────────────
+
 
 def insert_mistake(
     project_id: str,
@@ -1013,7 +1083,7 @@ def insert_workflow_run(
     from sqlalchemy import text
 
     run_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     with get_session() as session:
         if session is None:
@@ -1045,9 +1115,7 @@ def insert_workflow_run(
             return None
 
 
-def update_workflow_run_status(
-    run_id: str, status: str, completed_at: str | None = None
-) -> bool:
+def update_workflow_run_status(run_id: str, status: str, completed_at: str | None = None) -> bool:
     """Update the status of a workflow run."""
     from sqlalchemy import text
 
@@ -1087,7 +1155,7 @@ def insert_workflow_step(
     from sqlalchemy import text
 
     step_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     with get_session() as session:
         if session is None:
@@ -1183,9 +1251,7 @@ def get_workflow_run(run_id: str) -> dict | None:
             return None
 
 
-def get_workflow_runs(
-    project_id: str, status: str | None = None
-) -> list[dict]:
+def get_workflow_runs(project_id: str, status: str | None = None) -> list[dict]:
     """Return workflow runs for a project."""
     from sqlalchemy import text
 
@@ -1234,4 +1300,111 @@ def get_workflow_steps(run_id: str) -> list[dict]:
             return [dict(row._mapping) for row in result.fetchall()]
         except Exception as exc:
             logger.error("db/client: get_workflow_steps failed — %s", exc)
+            return []
+
+
+# ─── Analytics Helpers ──────────────────────────────────────────────────
+
+
+def get_sessions(project_id: str) -> list[dict]:
+    """Return all sessions for a project."""
+    from sqlalchemy import text
+
+    from db.client import get_session
+
+    with get_session() as session:
+        if session is None:
+            return []
+        try:
+            result = session.execute(
+                text(
+                    "SELECT id, project_id, started_at, ended_at, summary "
+                    "FROM sessions WHERE project_id = :project_id "
+                    "ORDER BY started_at DESC"
+                ),
+                {"project_id": project_id},
+            )
+            return [dict(row._mapping) for row in result.fetchall()]
+        except Exception as exc:
+            logger.error("db/client: get_sessions failed — %s", exc)
+            return []
+
+
+def get_commits_over_time(project_id: str, days: int = 7) -> list[dict]:
+    """Return commit counts per day for the last N days."""
+    from sqlalchemy import text
+
+    from db.client import get_session
+
+    with get_session() as session:
+        if session is None:
+            return []
+        try:
+            result = session.execute(
+                text(
+                    "SELECT CAST(committed_at AS DATE) AS day, "
+                    "COUNT(*) AS count "
+                    f"FROM commits WHERE project_id = :project_id "
+                    f"AND committed_at >= now() - INTERVAL '{days} days' "
+                    f"GROUP BY CAST(committed_at AS DATE) "
+                    f"ORDER BY day DESC"
+                ),
+                {"project_id": project_id},
+            )
+            return [dict(row._mapping) for row in result.fetchall()]
+        except Exception as exc:
+            logger.error("db/client: get_commits_over_time failed — %s", exc)
+            return []
+
+
+def get_file_edits_over_time(project_id: str, days: int = 7) -> list[dict]:
+    """Return file edit counts per day for the last N days."""
+    from sqlalchemy import text
+
+    from db.client import get_session
+
+    with get_session() as session:
+        if session is None:
+            return []
+        try:
+            result = session.execute(
+                text(
+                    "SELECT CAST(edited_at AS DATE) AS day, "
+                    "COUNT(*) AS count "
+                    f"FROM file_edits WHERE project_id = :project_id "
+                    f"AND edited_at >= now() - INTERVAL '{days} days' "
+                    f"GROUP BY CAST(edited_at AS DATE) "
+                    f"ORDER BY day DESC"
+                ),
+                {"project_id": project_id},
+            )
+            return [dict(row._mapping) for row in result.fetchall()]
+        except Exception as exc:
+            logger.error("db/client: get_file_edits_over_time failed — %s", exc)
+            return []
+
+
+def get_top_files(project_id: str, limit: int = 10) -> list[dict]:
+    """Return the most edited files for a project."""
+    from sqlalchemy import text
+
+    from db.client import get_session
+
+    with get_session() as session:
+        if session is None:
+            return []
+        try:
+            result = session.execute(
+                text(
+                    "SELECT file_path, COUNT(*) AS edit_count "
+                    "FROM file_edits WHERE project_id = :project_id "
+                    "GROUP BY file_path "
+                    "ORDER BY edit_count DESC "
+                    "LIMIT :limit"
+                ),
+                {"project_id": project_id, "limit": limit},
+            )
+            return [dict(row._mapping) for row in result.fetchall()]
+        except Exception as exc:
+            logger.error("db/client: get_top_files failed — %s", exc)
             return []

@@ -36,17 +36,89 @@ LLM_MAX_RETRIES = 3
 _LLM_COOLDOWN_SECONDS = 30.0
 _last_llm_fail_time: float = 0.0
 
-# ─── Ollama Configuration ──────────────────────────────────────────────
-OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_MODEL = "qwen2.5:7b"
-OLLAMA_EMBEDDING_MODEL = "nomic-embed-text"
+# ─── Ollama configuration (read at call time from settings / Setup screen) ──
+
+
+def _ollama_url() -> str:
+    from config import settings
+
+    return getattr(settings, "ollama_base_url", "") or "http://localhost:11434"
+
+
+def _ollama_chat_model() -> str:
+    """Model chosen in the Setup screen wins over _ollama_chat_model() from .env."""
+    from config import settings
+
+    try:
+        from memory.local_store import get_store
+
+        chosen = get_store().get_value("ollama_chat_model")
+        if chosen:
+            return str(chosen)
+    except Exception:
+        pass
+    return getattr(settings, "ollama_model", "") or "qwen2.5-coder:3b"
+
+
+def _ollama_embed_model() -> str:
+    from config import settings
+
+    return getattr(settings, "ollama_embedding_model", "") or "nomic-embed-text"
+
+
+# Which provider/model produced the most recent answer (shown in the UI).
+LAST_ANSWER: dict = {"provider": None, "model": None, "at": None}
+
+_online_cache: dict = {"at": -1e9, "value": True}
+
+
+def is_online(force: bool = False) -> bool:
+    """Cheap internet check (TCP to public DNS), cached for 30 s."""
+    import os
+    import socket
+
+    forced = os.environ.get("AUTOMATA_FORCE_ONLINE", "").strip()
+    if forced in {"0", "1"}:
+        return forced == "1"
+    if not force and time.monotonic() - _online_cache["at"] < 30:
+        return bool(_online_cache["value"])
+    value = False
+    for host, port in (("1.1.1.1", 443), ("8.8.8.8", 53)):
+        try:
+            with socket.create_connection((host, port), timeout=1.5):
+                value = True
+                break
+        except OSError:
+            continue
+    _online_cache.update(at=time.monotonic(), value=value)
+    return value
+
+
+def _ollama_port_open(timeout: float = 0.15) -> bool:
+    """Fast TCP probe. On Windows a refused connection otherwise costs ~2 s
+    (4 s for 'localhost', which tries IPv6 first), so check the port before HTTP."""
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(_ollama_url())
+    host = parsed.hostname or "127.0.0.1"
+    if host == "localhost":
+        host = "127.0.0.1"
+    try:
+        with socket.create_connection((host, parsed.port or 11434), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 def _get_ollama_available() -> bool:
     """Check if Ollama is running and reachable."""
+    if not _ollama_port_open():
+        return False
     try:
         import urllib.request
-        req = urllib.request.Request(f"{OLLAMA_BASE_URL}/api/tags", method="GET")
+
+        req = urllib.request.Request(f"{_ollama_url()}/api/tags", method="GET")
         with urllib.request.urlopen(req, timeout=2) as resp:
             if resp.status == 200:
                 return True
@@ -60,20 +132,23 @@ def _invoke_ollama_chat(system_prompt: str, user_message: str) -> str | None:
     import json
     import urllib.error
     import urllib.request
+
     try:
-        payload = json.dumps({
-            "model": OLLAMA_MODEL,
-            "system": system_prompt,
-            "prompt": user_message,
-            "stream": False,
-            "options": {
-                "temperature": 0.3,
-                "num_predict": 512,
-            },
-        }).encode("utf-8")
+        payload = json.dumps(
+            {
+                "model": _ollama_chat_model(),
+                "system": system_prompt,
+                "prompt": user_message,
+                "stream": False,
+                "options": {
+                    "temperature": 0.3,
+                    "num_predict": 512,
+                },
+            }
+        ).encode("utf-8")
 
         req = urllib.request.Request(
-            f"{OLLAMA_BASE_URL}/api/generate",
+            f"{_ollama_url()}/api/generate",
             data=payload,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -97,17 +172,20 @@ def _invoke_ollama_embedding(text: str) -> list[float] | None:
     """Call Ollama for embedding generation."""
     import json
     import urllib.request
+
     try:
-        payload = json.dumps({
-            "model": OLLAMA_EMBEDDING_MODEL,
-            "prompt": text,
-            "options": {
-                "num_ctx": 8192,
-            },
-        }).encode("utf-8")
+        payload = json.dumps(
+            {
+                "model": _ollama_embed_model(),
+                "prompt": text,
+                "options": {
+                    "num_ctx": 8192,
+                },
+            }
+        ).encode("utf-8")
 
         req = urllib.request.Request(
-            f"{OLLAMA_BASE_URL}/api/embeddings",
+            f"{_ollama_url()}/api/embeddings",
             data=payload,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -135,14 +213,16 @@ def _invoke_gemini_chat(api_key: str, system_prompt: str, user_message: str) -> 
 
     for model_name in candidate_models:
         for version in candidate_versions:
-            payload = json.dumps({
-                "contents": [{"role": "user", "parts": [{"text": user_message}]}],
-                "systemInstruction": {"parts": [{"text": system_prompt}]},
-                "generationConfig": {
-                    "temperature": 0.3,
-                    "maxOutputTokens": 512,
-                },
-            }).encode("utf-8")
+            payload = json.dumps(
+                {
+                    "contents": [{"role": "user", "parts": [{"text": user_message}]}],
+                    "systemInstruction": {"parts": [{"text": system_prompt}]},
+                    "generationConfig": {
+                        "temperature": 0.3,
+                        "maxOutputTokens": 512,
+                    },
+                }
+            ).encode("utf-8")
 
             try:
                 req = urllib.request.Request(
@@ -156,7 +236,12 @@ def _invoke_gemini_chat(api_key: str, system_prompt: str, user_message: str) -> 
                         body = json.loads(resp.read().decode("utf-8"))
                         candidates = body.get("candidates", [])
                         if candidates:
-                            return candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                            return (
+                                candidates[0]
+                                .get("content", {})
+                                .get("parts", [{}])[0]
+                                .get("text", "")
+                            )
             except urllib.error.HTTPError as exc:
                 logger.debug("Gemini chat attempt failed for %s/%s — %s", model_name, version, exc)
                 continue
@@ -177,9 +262,11 @@ def _invoke_gemini_embedding(api_key: str, text: str) -> list[float] | None:
     candidate_models = ["embedding-001", "text-embedding-004"]
     for model_name in candidate_models:
         try:
-            payload = json.dumps({
-                "content": {"parts": [{"text": text}]},
-            }).encode("utf-8")
+            payload = json.dumps(
+                {
+                    "content": {"parts": [{"text": text}]},
+                }
+            ).encode("utf-8")
 
             req = urllib.request.Request(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:embedContent?key={api_key}",
@@ -209,16 +296,19 @@ def _invoke_minimax_chat(api_key: str, system_prompt: str, user_message: str) ->
     """Call Minimax API for text generation."""
     import json
     import urllib.request
+
     try:
-        payload = json.dumps({
-            "model": "glm-4",
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            "max_tokens": 512,
-            "temperature": 0.3,
-        }).encode("utf-8")
+        payload = json.dumps(
+            {
+                "model": "glm-4",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                "max_tokens": 512,
+                "temperature": 0.3,
+            }
+        ).encode("utf-8")
 
         req = urllib.request.Request(
             "https://api.minimax.chat/v1/text/chatcompletion",
@@ -244,10 +334,9 @@ def _invoke_minimax_chat(api_key: str, system_prompt: str, user_message: str) ->
 def _invoke_openrouter_chat(api_key: str, system_prompt: str, user_message: str) -> str | None:
     """Call OpenRouter API for text generation."""
     import json
+    import os
     import urllib.error
     import urllib.request
-
-    import os
 
     primary_model = os.getenv("OPENROUTER_MODEL", "poolside/laguna-s-2.1:free")
     candidate_models = [
@@ -267,15 +356,17 @@ def _invoke_openrouter_chat(api_key: str, system_prompt: str, user_message: str)
             deduped_models.append(model)
 
     for model_name in deduped_models:
-        payload = json.dumps({
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            "max_tokens": 512,
-            "temperature": 0.3,
-        }).encode("utf-8")
+        payload = json.dumps(
+            {
+                "model": model_name,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                "max_tokens": 512,
+                "temperature": 0.3,
+            }
+        ).encode("utf-8")
 
         try:
             req = urllib.request.Request(
@@ -315,13 +406,15 @@ def _invoke_cohere_chat(api_key: str, system_prompt: str, user_message: str) -> 
 
     candidate_models = ["command-a-03-2025", "command-r-plus", "command-r"]
     for model_name in candidate_models:
-        payload = json.dumps({
-            "model": model_name,
-            "message": user_message,
-            "preamble": system_prompt,
-            "max_tokens": 512,
-            "temperature": 0.3,
-        }).encode("utf-8")
+        payload = json.dumps(
+            {
+                "model": model_name,
+                "message": user_message,
+                "preamble": system_prompt,
+                "max_tokens": 512,
+                "temperature": 0.3,
+            }
+        ).encode("utf-8")
 
         try:
             req = urllib.request.Request(
@@ -350,19 +443,80 @@ def _invoke_cohere_chat(api_key: str, system_prompt: str, user_message: str) -> 
     return None
 
 
-def _invoke_cohere_embedding(api_key: str, text: str) -> list[float] | None:
+def _invoke_cohere_embedding(text: str) -> list[float] | None:
     """Call Cohere API for embedding generation."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    from config import settings
+
+    api_key = getattr(settings, "cohere_api_key", "")
+    if not api_key:
+        logger.warning("Cohere embedding call failed — no API key configured")
+        return None
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            payload = json.dumps(
+                {
+                    "texts": [text[:2048]],
+                    "model": "embed-english-v3.0",
+                    "input_type": "search_query",
+                }
+            ).encode("utf-8")
+
+            req = urllib.request.Request(
+                "https://api.cohere.ai/v1/embed",
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+                if resp.status == 200:
+                    body = json.loads(resp.read().decode("utf-8"))
+                    embeddings = body.get("embeddings", [])
+                    if isinstance(embeddings, dict):
+                        float_embs = embeddings.get("float", [])
+                        if float_embs:
+                            logger.info("Embedding: Cohere succeeded")
+                            return float_embs[0]
+                    elif isinstance(embeddings, list) and embeddings:
+                        logger.info("Embedding: Cohere succeeded")
+                        return embeddings[0]
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429 and attempt < max_retries - 1:
+                wait = 2**attempt
+                logger.warning("Cohere embedding rate limited (429) — retrying in %ds", wait)
+                time.sleep(wait)
+                continue
+            logger.warning("Cohere embedding call failed — HTTP %s", exc.code)
+            break
+        except Exception as exc:
+            logger.warning("Cohere embedding call failed — %s", exc)
+            break
+    return None
+
+
+def _invoke_cohere_embedding_legacy(api_key: str, text: str) -> list[float] | None:
+    """Legacy Cohere embedding implementation for backward compatibility."""
     import json
     import urllib.error
     import urllib.request
 
     candidate_models = ["embed-english-v3.0", "embed-multilingual-v3.0", "embed-english-light-v3.0"]
     for model_name in candidate_models:
-        payload = json.dumps({
-            "texts": [text],
-            "model": model_name,
-            "input_type": "search_document",
-        }).encode("utf-8")
+        payload = json.dumps(
+            {
+                "texts": [text],
+                "model": model_name,
+                "input_type": "search_document",
+            }
+        ).encode("utf-8")
 
         try:
             req = urllib.request.Request(
@@ -400,18 +554,21 @@ def _invoke_nvidia_chat(api_key: str, system_prompt: str, user_message: str) -> 
     """Call NVIDIA NIM API for text generation (Nemotron-3-Ultra-550B)."""
     import json
     import urllib.request
+
     try:
-        payload = json.dumps({
-            "model": "nvidia/nemotron-3-ultra-550b-a55b",
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            "temperature": 0.3,
-            "top_p": 0.95,
-            "max_tokens": 8192,
-            "stream": False,
-        }).encode("utf-8")
+        payload = json.dumps(
+            {
+                "model": "nvidia/nemotron-3-ultra-550b-a55b",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                "temperature": 0.3,
+                "top_p": 0.95,
+                "max_tokens": 8192,
+                "stream": False,
+            }
+        ).encode("utf-8")
 
         req = urllib.request.Request(
             "https://integrate.api.nvidia.com/v1/chat/completions",
@@ -442,15 +599,17 @@ def _invoke_groq_chat(api_key: str, system_prompt: str, user_message: str) -> st
 
     candidate_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-70b-8192"]
     for model_name in candidate_models:
-        payload = json.dumps({
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            "max_tokens": 512,
-            "temperature": 0.3,
-        }).encode("utf-8")
+        payload = json.dumps(
+            {
+                "model": model_name,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                "max_tokens": 512,
+                "temperature": 0.3,
+            }
+        ).encode("utf-8")
 
         try:
             req = urllib.request.Request(
@@ -488,10 +647,12 @@ def _invoke_groq_embedding(api_key: str, text: str) -> list[float] | None:
 
     candidate_models = ["llama-3.2-1b-preview", "llama-3.1-8b-instant"]
     for model_name in candidate_models:
-        payload = json.dumps({
-            "model": model_name,
-            "input": text,
-        }).encode("utf-8")
+        payload = json.dumps(
+            {
+                "model": model_name,
+                "input": text,
+            }
+        ).encode("utf-8")
 
         try:
             req = urllib.request.Request(
@@ -531,6 +692,7 @@ def _invoke_bedrock_chat(
     import json
 
     from config import settings
+
     try:
         import boto3
         from botocore.config import Config
@@ -555,12 +717,14 @@ def _invoke_bedrock_chat(
             ),
         )
 
-        payload = json.dumps({
-            "messages": [{"role": "user", "content": [{"text": user_message}]}],
-            "system": [{"text": system_prompt}],
-            "maxTokens": 512,
-            "temperature": 0.3,
-        }).encode("utf-8")
+        payload = json.dumps(
+            {
+                "messages": [{"role": "user", "content": [{"text": user_message}]}],
+                "system": [{"text": system_prompt}],
+                "maxTokens": 512,
+                "temperature": 0.3,
+            }
+        ).encode("utf-8")
 
         response = client.invoke_model(
             modelId=settings.aws_bedrock_model_id,
@@ -571,10 +735,7 @@ def _invoke_bedrock_chat(
 
         body = json.loads(response["body"].read().decode("utf-8"))
         content = (
-            body.get("outputs", [])[0]
-            .get("message", {})
-            .get("content", [{}])[0]
-            .get("text", "")
+            body.get("outputs", [])[0].get("message", {}).get("content", [{}])[0].get("text", "")
             if body.get("outputs")
             else ""
         )
@@ -626,6 +787,11 @@ def invoke_reasoning(
             result = fn(api_key, system_prompt, grounded_prompt)
         if result:
             logger.info("LLM: %s succeeded", name)
+            LAST_ANSWER.update(
+                provider=name,
+                model=_ollama_chat_model() if name == "ollama" else None,
+                at=time.time(),
+            )
             return result
         logger.warning("LLM: %s failed", name)
         return None
@@ -640,7 +806,7 @@ def invoke_reasoning(
     if mode == "local":
         if not _get_ollama_available():
             logger.warning("invoke_reasoning: local mode selected but Ollama is unavailable")
-            print(_get_local_help())
+            logger.warning(_get_local_help())
             _all_llm_backends_exhausted()
             return None
         result = _try_provider("ollama", _invoke_ollama_chat)
@@ -650,66 +816,34 @@ def invoke_reasoning(
         _all_llm_backends_exhausted()
         return None
 
-    if mode == "cloud":
-        groq_key = getattr(settings, "groq_api_key", "")
-        gemini_key = getattr(settings, "gemini_api_key", "")
-        nvidia_key = getattr(settings, "nvidia_api_key", "")
-        minimax_key = getattr(settings, "minimax_api_key", "")
-        openrouter_key = getattr(settings, "openrouter_api_key", "")
-        cohere_key = getattr(settings, "cohere_api_key", "")
-
-        for provider_name, api_key, func in [
-            ("OpenRouter", openrouter_key, _invoke_openrouter_chat),
-            ("Groq", groq_key, _invoke_groq_chat),
-            ("Gemini", gemini_key, _invoke_gemini_chat),
-            ("Cohere", cohere_key, _invoke_cohere_chat),
-            ("NVIDIA", nvidia_key, _invoke_nvidia_chat),
-            ("Minimax", minimax_key, _invoke_minimax_chat),
-        ]:
-            if api_key:
-                result = _try_provider(provider_name, func, api_key)
-                if result:
-                    return result
-
-        if settings.bedrock_available:
-            result = _try_provider("bedrock", _invoke_bedrock_chat)
-            if result:
-                _last_llm_fail_time = 0.0
-                return result
-
-        logger.warning("invoke_reasoning: No cloud LLM backend available")
-        _all_llm_backends_exhausted()
-        return None
-
-    # auto mode: try cloud providers first, then Bedrock, then Ollama as local fallback.
-    groq_key = getattr(settings, "groq_api_key", "")
-    gemini_key = getattr(settings, "gemini_api_key", "")
-    nvidia_key = getattr(settings, "nvidia_api_key", "")
-    minimax_key = getattr(settings, "minimax_api_key", "")
-    openrouter_key = getattr(settings, "openrouter_api_key", "")
-    cohere_key = getattr(settings, "cohere_api_key", "")
-
-    for provider_name, api_key, func in [
-        ("OpenRouter", openrouter_key, _invoke_openrouter_chat),
-        ("Groq", groq_key, _invoke_groq_chat),
-        ("Gemini", gemini_key, _invoke_gemini_chat),
-        ("Cohere", cohere_key, _invoke_cohere_chat),
-        ("NVIDIA", nvidia_key, _invoke_nvidia_chat),
-        ("Minimax", minimax_key, _invoke_minimax_chat),
-    ]:
-        if api_key:
+    # Groq first: it answers in under 5s. OpenRouter's free model takes
+    # 30-60s, so it must never delay a fast provider.
+    cloud_providers = [
+        ("Groq", getattr(settings, "groq_api_key", ""), _invoke_groq_chat),
+        ("OpenRouter", getattr(settings, "openrouter_api_key", ""), _invoke_openrouter_chat),
+        ("Gemini", getattr(settings, "gemini_api_key", ""), _invoke_gemini_chat),
+        ("Cohere", getattr(settings, "cohere_api_key", ""), _invoke_cohere_chat),
+        ("NVIDIA", getattr(settings, "nvidia_api_key", ""), _invoke_nvidia_chat),
+        ("Minimax", getattr(settings, "minimax_api_key", ""), _invoke_minimax_chat),
+    ]
+    online = is_online()
+    if not online:
+        logger.info("invoke_reasoning: offline — using the local model only")
+    for provider_name, api_key, func in cloud_providers:
+        if api_key and online:
             result = _try_provider(provider_name, func, api_key)
             if result:
                 _last_llm_fail_time = 0.0
                 return result
 
-    if settings.bedrock_available:
+    if settings.bedrock_available and online:
         result = _try_provider("bedrock", _invoke_bedrock_chat)
         if result:
             _last_llm_fail_time = 0.0
             return result
 
-    if _get_ollama_available():
+    # auto mode falls back to local Ollama; cloud mode never does.
+    if mode != "cloud" and _get_ollama_available():
         result = _try_provider("ollama", _invoke_ollama_chat)
         if result:
             _last_llm_fail_time = 0.0
@@ -793,7 +927,7 @@ def invoke_embedding(text: str) -> list[float] | None:
     # Local mode: only Ollama
     if mode == "local":
         if _get_ollama_available():
-            logger.info("Embedding: trying Ollama (%s)", OLLAMA_EMBEDDING_MODEL)
+            logger.info("Embedding: trying Ollama (%s)", _ollama_embed_model())
             result = _invoke_ollama_embedding(text)
             if result:
                 logger.info("Embedding: Ollama succeeded")
@@ -806,10 +940,18 @@ def invoke_embedding(text: str) -> list[float] | None:
 
     # Cloud mode: try cloud embeddings only
     if mode == "cloud":
+        logger.info("Embedding: trying Cohere")
+        result = _invoke_cohere_embedding(text)
+        if result:
+            logger.info("Embedding: Cohere succeeded")
+            _last_embedding_fail_time = 0.0
+            return result
+        logger.warning("Embedding: Cohere failed")
+
         cohere_key = getattr(settings, "cohere_api_key", "")
         if cohere_key:
-            logger.info("Embedding: trying Cohere")
-            result = _invoke_cohere_embedding(cohere_key, text)
+            logger.info("Embedding: trying Cohere (legacy)")
+            result = _invoke_cohere_embedding_legacy(cohere_key, text)
             if result:
                 logger.info("Embedding: Cohere succeeded")
                 _last_embedding_fail_time = 0.0
@@ -852,7 +994,7 @@ def invoke_embedding(text: str) -> list[float] | None:
     # Auto mode: Ollama first, then cloud embeddings
     # Primary: Ollama (free, local)
     if _get_ollama_available():
-        logger.info("Embedding: trying Ollama (%s)", OLLAMA_EMBEDDING_MODEL)
+        logger.info("Embedding: trying Ollama (%s)", _ollama_embed_model())
         result = _invoke_ollama_embedding(text)
         if result:
             logger.info("Embedding: Ollama succeeded")
@@ -860,11 +1002,19 @@ def invoke_embedding(text: str) -> list[float] | None:
             return result
         logger.warning("Embedding: Ollama failed")
 
-    # Try cloud embeddings
+    # Try cloud embeddings - Cohere as fallback
+    logger.info("Embedding: trying Cohere")
+    result = _invoke_cohere_embedding(text)
+    if result:
+        logger.info("Embedding: Cohere succeeded")
+        _last_embedding_fail_time = 0.0
+        return result
+    logger.warning("Embedding: Cohere failed")
+
     cohere_key = getattr(settings, "cohere_api_key", "")
     if cohere_key:
-        logger.info("Embedding: trying Cohere")
-        result = _invoke_cohere_embedding(cohere_key, text)
+        logger.info("Embedding: trying Cohere (legacy)")
+        result = _invoke_cohere_embedding_legacy(cohere_key, text)
         if result:
             logger.info("Embedding: Cohere succeeded")
             _last_embedding_fail_time = 0.0
@@ -909,6 +1059,7 @@ def _load_prompt_template(name: str) -> str:
     """Load a prompt template from backend/ai/prompts/<name>.txt."""
     try:
         from pathlib import Path
+
         template_path = Path(__file__).parent / "prompts" / f"{name}.txt"
         return template_path.read_text(encoding="utf-8")
     except Exception as exc:
@@ -937,3 +1088,117 @@ def _build_grounded_prompt(
             "Answer using ONLY the memory entries above. Be direct. No filler."
         )
     return template.format(memory_context=memory_context, user_message=user_message)
+
+
+# ─── Local (on-device) models ───────────────────────────────────────────────
+
+_fastembed_model = None
+FASTEMBED_MODEL_NAME = "BAAI/bge-small-en-v1.5"
+
+
+def _fastembed_enabled() -> bool:
+    try:
+        from memory.local_store import get_store
+
+        return bool(get_store().get_value("fastembed_enabled", False))
+    except Exception:
+        return False
+
+
+def fastembed_status() -> dict:
+    try:
+        import fastembed  # noqa: F401
+
+        installed = True
+    except ImportError:
+        installed = False
+    return {
+        "installed": installed,
+        "enabled": installed and _fastembed_enabled(),
+        "model": FASTEMBED_MODEL_NAME,
+        "loaded": _fastembed_model is not None,
+    }
+
+
+def _fastembed_embed(texts: list[str]) -> list[list[float]] | None:
+    global _fastembed_model
+    if not _fastembed_enabled():
+        return None
+    try:
+        from fastembed import TextEmbedding
+
+        if _fastembed_model is None:
+            from config import data_dir
+            import os
+
+            _fastembed_model = TextEmbedding(
+                FASTEMBED_MODEL_NAME, cache_dir=os.path.join(data_dir(), "models")
+            )
+        return [list(map(float, v)) for v in _fastembed_model.embed(texts)]
+    except Exception as exc:
+        logger.warning("fastembed embedding failed — %s", exc)
+        return None
+
+
+def ollama_status() -> dict:
+    """Is Ollama installed / running, which models are pulled, which are selected."""
+    import json
+    import os
+    import shutil
+    import urllib.request
+
+    exe = shutil.which("ollama") or next(
+        (
+            p
+            for p in (
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Ollama", "ollama.exe"),
+                r"C:\Program Files\Ollama\ollama.exe",
+            )
+            if os.path.exists(p)
+        ),
+        None,
+    )
+    models: list[str] = []
+    running = False
+    try:
+        if not _ollama_port_open():
+            raise ConnectionError("Ollama port closed")
+        with urllib.request.urlopen(f"{_ollama_url()}/api/tags", timeout=2) as resp:
+            running = resp.status == 200
+            models = [m.get("name", "") for m in json.loads(resp.read()).get("models", [])]
+    except Exception:
+        pass
+
+    def has(model: str) -> bool:
+        return model in models or (":" not in model and f"{model}:latest" in models)
+
+    chat, embed = _ollama_chat_model(), _ollama_embed_model()
+    return {
+        "installed": bool(exe) or running,
+        "exe": exe,
+        "running": running,
+        "url": _ollama_url(),
+        "models": models,
+        "chat_model": chat,
+        "chat_model_ready": has(chat),
+        "embedding_model": embed,
+        "embedding_model_ready": has(embed),
+    }
+
+
+def invoke_local_embedding(texts: list[str]) -> tuple[list[list[float]], str] | None:
+    """Embed *texts* on this machine only (fastembed, then Ollama). None if neither works."""
+    if not texts:
+        return None
+    vectors = _fastembed_embed(texts)
+    if vectors:
+        return vectors, f"fastembed:{FASTEMBED_MODEL_NAME}"
+    if not _get_ollama_available():
+        return None
+    out: list[list[float]] = []
+    for text in texts:
+        vec = _invoke_ollama_embedding(text)
+        if not vec:
+            return None
+        out.append(vec)
+    return out, f"ollama:{_ollama_embed_model()}"

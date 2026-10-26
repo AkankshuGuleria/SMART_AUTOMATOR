@@ -7,10 +7,9 @@ import { motion } from 'framer-motion'
 import {
   Search, LayoutDashboard, MessageSquare, Brain,
   Activity, Cpu, Folder, RefreshCw, Settings,
-  ArrowRight, Command,
+  ArrowRight, Command, ListChecks, Inbox, ShieldCheck,
 } from 'lucide-react'
-
-type Screen = 'dashboard' | 'chat' | 'activity' | 'resources' | 'projects' | 'memory' | 'restore' | 'settings'
+import type { Screen } from '../../lib/screens'
 
 interface Command {
   id: string
@@ -33,9 +32,12 @@ interface CommandPaletteProps {
 const SCREEN_COMMANDS: Command[] = [
   { id: 'nav-dashboard',  label: 'Go to Dashboard',         group: 'Navigate', icon: LayoutDashboard, screen: 'dashboard', keywords: ['home', 'overview'] },
   { id: 'nav-chat',       label: 'Go to AI Chat',           group: 'Navigate', icon: MessageSquare,   screen: 'chat',      keywords: ['ask', 'agent', 'query'] },
+  { id: 'nav-tasks',      label: 'Tasks',                   group: 'Navigate', icon: ListChecks,      screen: 'tasks',     keywords: ['delegate', 'antigravity', 'claude', 'agent', 'build'] },
+  { id: 'nav-inbox',      label: 'Needs from you',          group: 'Navigate', icon: Inbox,           screen: 'inbox',     keywords: ['api key', 'secret', 'env', 'connection string', 'inbox'] },
+  { id: 'nav-setup',      label: 'Setup & health',          group: 'Navigate', icon: ShieldCheck,     screen: 'setup',     keywords: ['ollama', 'local model', 'offline', 'self check', 'health'] },
   { id: 'nav-memory',     label: 'Open Memory Visualization', group: 'Navigate', icon: Brain,          screen: 'memory',    keywords: ['graph', 'knowledge'] },
   { id: 'nav-activity',   label: 'View Activity Feed',      group: 'Navigate', icon: Activity,        screen: 'activity',  keywords: ['feed', 'events'] },
-  { id: 'nav-resources',  label: 'Resources & Usage',       group: 'Navigate', icon: Cpu,             screen: 'resources', keywords: ['cpu', 'ram', 'time', 'usage'] },
+  { id: 'nav-resources',  label: 'Resources & Usage',       group: 'Navigate', icon: Cpu,             screen: 'resources', keywords: ['cpu', 'gpu', 'ram', 'memory usage', 'apps', 'time', 'usage', 'processes'] },
   { id: 'nav-projects',   label: 'Projects',                group: 'Navigate', icon: Folder,          screen: 'projects',  keywords: ['repo', 'workspace'] },
   { id: 'nav-restore',    label: 'Restore Workspace',       group: 'Navigate', icon: RefreshCw,       screen: 'restore',   keywords: ['recover', 'session'] },
   { id: 'nav-settings',   label: 'Settings',                group: 'Navigate', icon: Settings,        screen: 'settings',  keywords: ['config', 'preferences'] },
@@ -71,7 +73,7 @@ export default function CommandPaletteV2({ onClose, onNavigate, onChatMessage }:
       group: 'AI',
       icon: MessageSquare,
       action: () => { onChatMessage(query.trim()); onNavigate('chat'); onClose() },
-      keywords: [],
+      keywords: [query.trim().toLowerCase()],
     })
   }
 

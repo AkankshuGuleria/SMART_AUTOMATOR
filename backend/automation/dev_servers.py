@@ -14,6 +14,8 @@ Phase 3: Implement using subprocess + os_windows.py for process management.
 """
 
 import logging
+import os
+import subprocess
 from typing import Any
 
 from automation.os_windows import open_terminal_with_command
@@ -56,12 +58,14 @@ def start_dev_servers(project_id: str, server_configs: list[dict] | None = None)
         port = config.get("port")
 
         if not command:
-            results.append({
-                "name": name,
-                "status": "error",
-                "pid": None,
-                "detail": "No command configured",
-            })
+            results.append(
+                {
+                    "name": name,
+                    "status": "error",
+                    "pid": None,
+                    "detail": "No command configured",
+                }
+            )
             continue
 
         # Build the command with port if specified
@@ -75,20 +79,21 @@ def start_dev_servers(project_id: str, server_configs: list[dict] | None = None)
                 results.append({"name": name, "status": "started", "pid": pid})
                 logger.info("start_dev_servers: started | name=%s pid=%d", name, pid)
             else:
-                results.append({
-                    "name": name,
-                    "status": "error",
-                    "pid": None,
-                    "detail": "Failed to launch terminal",
-                })
+                results.append(
+                    {
+                        "name": name,
+                        "status": "error",
+                        "pid": None,
+                        "detail": "Failed to launch terminal",
+                    }
+                )
         except Exception as exc:
             results.append({"name": name, "status": "error", "pid": None, "detail": str(exc)})
             logger.error("start_dev_servers: error starting %s — %s", name, exc)
 
     # Track running servers in memory
     _running_servers[project_id] = [
-        {"name": r["name"], "pid": r.get("pid"), "status": r["status"]}
-        for r in results
+        {"name": r["name"], "pid": r.get("pid"), "status": r["status"]} for r in results
     ]
 
     return {
@@ -116,21 +121,26 @@ def stop_dev_servers(project_id: str) -> dict[str, Any]:
         try:
             import os
             import signal
+
             os.kill(pid, signal.SIGTERM)
-            results.append({
-                "name": name,
-                "status": "ok",
-                "detail": f"Sent SIGTERM to PID {pid}",
-            })
+            results.append(
+                {
+                    "name": name,
+                    "status": "ok",
+                    "detail": f"Sent SIGTERM to PID {pid}",
+                }
+            )
             logger.info("stop_dev_servers: stopped | name=%s pid=%d", name, pid)
         except ProcessLookupError:
             results.append({"name": name, "status": "ok", "detail": "Process already terminated"})
         except PermissionError:
-            results.append({
-                "name": name,
-                "status": "error",
-                "detail": "Permission denied — cannot stop process",
-            })
+            results.append(
+                {
+                    "name": name,
+                    "status": "error",
+                    "detail": "Permission denied — cannot stop process",
+                }
+            )
         except Exception as exc:
             results.append({"name": name, "status": "error", "detail": str(exc)})
             logger.error("stop_dev_servers: error stopping %s — %s", name, exc)
@@ -164,3 +174,56 @@ def _get_default_server_configs(project_id: str) -> list[dict]:
             "port": 5173,
         },
     ]
+
+
+def _port_in_use(port: int) -> bool:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.3)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
+def start_project_dev_servers(repo_path: str) -> list[dict]:
+    """Start each app's dev command from the detected run book (one console each).
+
+    Uses intelligence.profile, so Next.js, Django, Vite, FastAPI… each get their
+    own real command. Apps whose usual port is already serving are skipped (no
+    duplicate servers, e.g. restoring AUTOMATA while its backend runs).
+    """
+    from intelligence.profile import detect
+
+    profile = detect(repo_path)
+    if not profile.get("ok"):
+        return [{"server": "dev", "status": "error", "detail": profile.get("error", "profile failed")}]
+    results: list[dict] = []
+    for entry in profile["run_book"]:
+        cmd = entry["commands"].get("dev") or entry["commands"].get("start")
+        name = entry["path"] if entry["path"] != "." else entry["language"]
+        if not cmd:
+            results.append({"server": name, "status": "skipped", "detail": "no dev/start command"})
+            continue
+        app = next((a for a in profile["apps"] if a["path"] == entry["path"]), {})
+        port = next(
+            (DEFAULT_PORTS_BY_FW[f] for f in app.get("frameworks", []) if f in DEFAULT_PORTS_BY_FW), None
+        )
+        if port and _port_in_use(port):
+            results.append({"server": name, "status": "skipped", "detail": f"port {port} already serving"})
+            continue
+        cwd = os.path.join(repo_path, entry["path"]) if entry["path"] != "." else repo_path
+        try:
+            subprocess.Popen(
+                cmd, cwd=cwd, shell=True, creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+            )
+            results.append({"server": name, "status": "ok", "detail": f"`{cmd}` in {cwd}"})
+        except Exception as exc:
+            results.append({"server": name, "status": "error", "detail": str(exc)})
+    if not results:
+        results.append({"server": "dev", "status": "skipped", "detail": "no runnable app detected"})
+    return results
+
+
+DEFAULT_PORTS_BY_FW = {
+    "Vite": 5173, "Next.js": 3000, "Nuxt": 3000, "SvelteKit": 5173, "Angular": 4200,
+    "FastAPI": 8000, "Django": 8000, "Flask": 5000, "Streamlit": 8501,
+}

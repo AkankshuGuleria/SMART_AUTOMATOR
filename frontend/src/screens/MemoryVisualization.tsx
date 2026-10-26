@@ -1,42 +1,52 @@
 /**
  * screens/MemoryVisualization.tsx
  * Tangible memory experience: timeline, interactive node graph, categories, semantic connections.
+ * Data sourced from GET /projects/{projectId}/memory-graph.
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Brain, GitCommit, Terminal as TerminalIcon, FileEdit,
   Lightbulb, Clock, Filter, ChevronDown, ChevronUp, Layers,
+  CheckSquare,
 } from 'lucide-react'
 import GlassCard from '../components/ui/GlassCard'
+import {
+  getMemoryGraph,
+  type MemoryGraphData,
+  type MemoryGraphNode,
+  type MemoryGraphEdge,
+} from '../lib/api'
 
-type MemoryType = 'all' | 'commit' | 'file' | 'terminal' | 'decision' | 'architecture'
+interface MemoryVisualizationProps {
+  projectId?: string
+}
+
+type MemoryType = 'all' | 'commit' | 'file' | 'terminal' | 'decision' | 'architecture' | 'todo'
 
 interface Memory {
   id: string
-  type: 'commit' | 'file' | 'terminal' | 'decision' | 'architecture'
+  type: 'commit' | 'file' | 'terminal' | 'decision' | 'architecture' | 'todo'
   content: string
   timestamp: string
   tags?: string[]
   connections?: string[]
 }
 
-const MOCK_MEMORIES: Memory[] = [
-  { id: 'm1', type: 'decision', content: 'Chose CockroachDB vector search over Pinecone to keep single-DB architecture. Reduced ops overhead and cost for the hackathon scope.', timestamp: '2 hours ago', tags: ['architecture', 'database'], connections: ['m3', 'm5'] },
-  { id: 'm2', type: 'commit', content: 'feat: add vector retrieval pipeline with ANN search. Implemented cosine similarity ranking over 1536-dim embeddings.', timestamp: '5 hours ago', tags: ['memory', 'search'], connections: ['m1'] },
-  { id: 'm3', type: 'architecture', content: 'Decided to use Bedrock + Groq + Ollama as fallback chain. Primary: Ollama (local speed), fallback: Groq (fast cloud), emergency: Bedrock.', timestamp: 'Yesterday', tags: ['ai', 'architecture'], connections: ['m1', 'm4'] },
-  { id: 'm4', type: 'terminal', content: 'uv run python main.py — backend starts on :8000 with hot-reload. FastAPI + uvicorn with CORS for localhost:1420 (Tauri).', timestamp: 'Yesterday', tags: ['devops'] },
-  { id: 'm5', type: 'file', content: 'backend/ai/bedrock_client.py modified: Added invoke_embedding() with multi-provider support. Falls back through 6 providers.', timestamp: '2 days ago', tags: ['ai', 'embeddings'], connections: ['m2'] },
-  { id: 'm6', type: 'decision', content: 'Chose Tauri over Electron for the desktop shell — 10x smaller binary, Rust backend, no Chromium bundled. Native system calls for workspace restore.', timestamp: '3 days ago', tags: ['architecture', 'desktop'] },
-  { id: 'm7', type: 'commit', content: 'fix: handle null embeddings gracefully in retrieval pipeline. Added fallback to keyword search when vector is None.', timestamp: '3 days ago', tags: ['bug', 'memory'] },
-]
+interface GraphNode extends MemoryGraphNode {
+  x: number
+  y: number
+  label: string
+  type: string
+}
 
 const TYPE_CONFIG: Record<string, { icon: React.FC<{ size?: number }>; color: string; bg: string; label: string }> = {
-  commit:       { icon: GitCommit,     color: 'var(--info)',     bg: 'var(--info-muted)',     label: 'Commit' },
-  file:         { icon: FileEdit,      color: 'var(--success)',  bg: 'var(--success-muted)',  label: 'File Edit' },
-  terminal:     { icon: TerminalIcon,  color: 'var(--warning)',  bg: 'var(--warning-muted)',  label: 'Terminal' },
-  decision:     { icon: Lightbulb,     color: 'var(--accent-2)', bg: 'var(--accent-muted)',   label: 'Decision' },
-  architecture: { icon: Layers,        color: 'var(--ai-cyan)',  bg: 'var(--ai-cyan-muted)',  label: 'Architecture' },
+  commit:       { icon: GitCommit,     color: 'var(--info)',      bg: 'var(--info-muted)',      label: 'Commit' },
+  file:         { icon: FileEdit,      color: 'var(--success)',   bg: 'var(--success-muted)',   label: 'File Edit' },
+  terminal:     { icon: TerminalIcon,  color: 'var(--warning)',   bg: 'var(--warning-muted)',   label: 'Terminal' },
+  decision:     { icon: Lightbulb,     color: 'var(--accent-2)',  bg: 'var(--accent-muted)',    label: 'Decision' },
+  architecture: { icon: Layers,        color: 'var(--ai-cyan)',   bg: 'var(--ai-cyan-muted)',   label: 'Architecture' },
+  todo:         { icon: CheckSquare,   color: 'var(--warning)',   bg: 'var(--warning-muted)',   label: 'TODO' },
 }
 
 const CATEGORY_FILTERS: { id: MemoryType; label: string }[] = [
@@ -46,31 +56,234 @@ const CATEGORY_FILTERS: { id: MemoryType; label: string }[] = [
   { id: 'architecture', label: 'Architecture' },
   { id: 'file',         label: 'File Edits' },
   { id: 'terminal',     label: 'Terminal' },
+  { id: 'todo',         label: 'TODOs' },
 ]
 
-// Simple 2D node graph (CSS-based, no Three.js dependency for now)
-const NODES = [
-  { id: 'm1', label: 'CockroachDB Decision', type: 'decision', x: 260, y: 120 },
-  { id: 'm2', label: 'Vector Retrieval', type: 'commit', x: 420, y: 220 },
-  { id: 'm3', label: 'AI Provider Chain', type: 'architecture', x: 140, y: 250 },
-  { id: 'm4', label: 'Backend Startup', type: 'terminal', x: 80, y: 380 },
-  { id: 'm5', label: 'Embedding Pipeline', type: 'file', x: 380, y: 350 },
-  { id: 'm6', label: 'Tauri Choice', type: 'decision', x: 520, y: 100 },
-  { id: 'm7', label: 'Null Fix', type: 'commit', x: 480, y: 300 },
-]
+const TABLE_TO_TYPE: Record<string, Memory['type']> = {
+  commits: 'commit',
+  file_edits: 'file',
+  architecture_notes: 'architecture',
+  decision_log: 'decision',
+  todos: 'todo',
+}
 
-const EDGES = [
-  { from: 'm1', to: 'm2' }, { from: 'm1', to: 'm3' }, { from: 'm3', to: 'm4' },
-  { from: 'm2', to: 'm5' }, { from: 'm5', to: 'm7' }, { from: 'm1', to: 'm5' },
-]
+function formatTimeAgo(ts: string | null | undefined): string {
+  if (!ts) return 'Unknown time'
+  try {
+    const date = new Date(ts)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+    const diffDays = Math.floor(diffHours / 24)
+    if (diffHours < 1) return 'Just now'
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`
+    if (diffDays < 2) return 'Yesterday'
+    if (diffDays < 7) return `${diffDays} days ago`
+    return date.toLocaleDateString()
+  } catch {
+    return ts
+  }
+}
 
-export default function MemoryVisualization() {
+function generateCircularLayout(nodeIds: string[]): Record<string, { x: number; y: number }> {
+  const centerX = 310
+  const centerY = 220
+  const radius = nodeIds.length > 1 ? 150 : 0
+  const result: Record<string, { x: number; y: number }> = {}
+  nodeIds.forEach((id, i) => {
+    const angle = nodeIds.length === 1 ? 0 : (i / nodeIds.length) * 2 * Math.PI - Math.PI / 2
+    result[id] = {
+      x: centerX + Math.cos(angle) * radius,
+      y: centerY + Math.sin(angle) * radius,
+    }
+  })
+  return result
+}
+
+export default function MemoryVisualization({ projectId }: MemoryVisualizationProps) {
+  const [memories, setMemories] = useState<Memory[]>([])
+  const [graphNodes, setGraphNodes] = useState<GraphNode[]>([])
+  const [graphEdges, setGraphEdges] = useState<MemoryGraphEdge[]>([])
   const [activeFilter, setActiveFilter] = useState<MemoryType>('all')
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [hoveredNode, setHoveredNode] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'timeline' | 'graph'>('timeline')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const filtered = activeFilter === 'all' ? MOCK_MEMORIES : MOCK_MEMORIES.filter(m => m.type === activeFilter)
+  useEffect(() => {
+    if (!projectId) {
+      setLoading(false)
+      setError(null)
+      setMemories([])
+      setGraphNodes([])
+      setGraphEdges([])
+      return
+    }
+
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+
+    getMemoryGraph(projectId)
+      .then((data: MemoryGraphData) => {
+        if (cancelled) return
+
+        let edges = [...data.edges]
+
+        // Add sibling edges: connect most recent commit to most recent file edit and most recent TODO
+        const commits = data.nodes.filter((n) => n.table === 'commits')
+        const fileEdits = data.nodes.filter((n) => n.table === 'file_edits')
+        const todos = data.nodes.filter((n) => n.table === 'todos')
+
+        if (commits.length > 0 && fileEdits.length > 0) {
+          const mostRecentCommit = commits.reduce((latest, c) =>
+            new Date(c.timestamp || 0) > new Date(latest.timestamp || 0) ? c : latest
+          )
+          const mostRecentFile = fileEdits.reduce((latest, f) =>
+            new Date(f.timestamp || 0) > new Date(latest.timestamp || 0) ? f : latest
+          )
+          // Avoid duplicate edges
+          const exists = edges.some(
+            (e) =>
+              (e.source === mostRecentCommit.id && e.target === mostRecentFile.id) ||
+              (e.source === mostRecentFile.id && e.target === mostRecentCommit.id)
+          )
+          if (!exists) {
+            edges.push({ source: mostRecentCommit.id, target: mostRecentFile.id, type: 'related' })
+          }
+        }
+
+        if (commits.length > 0 && todos.length > 0) {
+          const mostRecentCommit = commits.reduce((latest, c) =>
+            new Date(c.timestamp || 0) > new Date(latest.timestamp || 0) ? c : latest
+          )
+          const mostRecentTodo = todos.reduce((latest, t) =>
+            new Date(t.timestamp || 0) > new Date(latest.timestamp || 0) ? t : latest
+          )
+          const exists = edges.some(
+            (e) =>
+              (e.source === mostRecentCommit.id && e.target === mostRecentTodo.id) ||
+              (e.source === mostRecentTodo.id && e.target === mostRecentCommit.id)
+          )
+          if (!exists) {
+            edges.push({ source: mostRecentCommit.id, target: mostRecentTodo.id, type: 'related' })
+          }
+        }
+
+        const connectionCounts: Record<string, string[]> = {}
+        edges.forEach((e) => {
+          connectionCounts[e.source] = [...(connectionCounts[e.source] || []), e.target]
+          connectionCounts[e.target] = [...(connectionCounts[e.target] || []), e.source]
+        })
+
+        const mems: Memory[] = data.nodes.map((n) => ({
+          id: n.id,
+          type: TABLE_TO_TYPE[n.table] || 'architecture',
+          content: n.content,
+          timestamp: formatTimeAgo(n.timestamp),
+          connections: connectionCounts[n.id]?.length > 0 ? connectionCounts[n.id] : undefined,
+        }))
+        setMemories(mems)
+
+        const positions = generateCircularLayout(data.nodes.map((n) => n.id))
+        const gNodes: GraphNode[] = data.nodes.map((n) => ({
+          ...n,
+          x: positions[n.id].x,
+          y: positions[n.id].y,
+          label: n.content.slice(0, 28),
+          type: TABLE_TO_TYPE[n.table] || 'architecture',
+        }))
+        setGraphNodes(gNodes)
+        setGraphEdges(edges)
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load memory graph')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
+
+  const filtered = activeFilter === 'all'
+    ? memories
+    : memories.filter((m) => m.type === activeFilter)
+
+  if (loading) {
+    return (
+      <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ type: 'spring', stiffness: 220, damping: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.25rem' }}>
+            <Brain size={22} color="var(--ai-purple)" strokeWidth={2} />
+            <h1>Memory Visualization</h1>
+          </div>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-tertiary)' }}>
+            Loading your memory graph…
+          </p>
+        </motion.div>
+        <div className="automata-loading" role="status" aria-live="polite">
+          <span className="automata-spinner" aria-hidden="true" />
+          <p>Retrieving memories from persistent storage…</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ type: 'spring', stiffness: 220, damping: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.25rem' }}>
+            <Brain size={22} color="var(--ai-purple)" strokeWidth={2} />
+            <h1>Memory Visualization</h1>
+          </div>
+        </motion.div>
+        <div className="automata-error" role="alert">
+          <p>Could not load memory graph.</p>
+          <p>{error}</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!projectId) {
+    return (
+      <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ type: 'spring', stiffness: 220, damping: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.25rem' }}>
+            <Brain size={22} color="var(--ai-purple)" strokeWidth={2} />
+            <h1>Memory Visualization</h1>
+          </div>
+        </motion.div>
+        <div className="automata-empty">
+          <p>Select a project to view memory visualization.</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (memories.length === 0) {
+    return (
+      <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ type: 'spring', stiffness: 220, damping: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.25rem' }}>
+            <Brain size={22} color="var(--ai-purple)" strokeWidth={2} />
+            <h1>Memory Visualization</h1>
+          </div>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-tertiary)' }}>
+            0 memories captured · Knowledge graph · Semantic connections
+          </p>
+        </motion.div>
+        <div className="automata-empty">
+          <p>No memories captured yet. Start a session to begin building your knowledge graph.</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -81,7 +294,7 @@ export default function MemoryVisualization() {
           <h1>Memory Visualization</h1>
         </div>
         <p style={{ fontSize: '0.85rem', color: 'var(--text-tertiary)' }}>
-          {MOCK_MEMORIES.length} memories captured · Knowledge graph · Semantic connections
+          {memories.length} memories captured · Knowledge graph · Semantic connections
         </p>
       </motion.div>
 
@@ -190,7 +403,7 @@ export default function MemoryVisualization() {
                             padding: '0.1rem 0.5rem', borderRadius: 3,
                             background: cfg.bg, color: cfg.color,
                           }}>{cfg.label}</span>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: '0.65rem', color: 'var(--text-tertiary)' }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 2, fontSize: '0.65rem', color: 'var(--text-tertiary)' }}>
                             <Clock size={10} />
                             {mem.timestamp}
                           </span>
@@ -227,7 +440,7 @@ export default function MemoryVisualization() {
                             )}
                             {mem.connections && mem.connections.length > 0 && (
                               <div style={{ fontSize: '0.68rem', color: 'var(--text-tertiary)' }}>
-                                🔗 Connected to {mem.connections.length} other memor{mem.connections.length > 1 ? 'ies' : 'y'}
+                                Connected to {mem.connections.length} other memor{mem.connections.length > 1 ? 'ies' : 'y'}
                               </div>
                             )}
                           </div>
@@ -258,112 +471,130 @@ export default function MemoryVisualization() {
                 pointerEvents: 'none',
               }} />
 
-              <svg
-                width="100%"
-                height="440"
-                viewBox="0 0 620 440"
-                style={{ position: 'absolute', inset: 0 }}
-              >
-                {/* Edges */}
-                {EDGES.map((edge, i) => {
-                  const from = NODES.find(n => n.id === edge.from)!
-                  const to   = NODES.find(n => n.id === edge.to)!
-                  const isHovered = hoveredNode === edge.from || hoveredNode === edge.to
-                  return (
-                    <motion.line
-                      key={i}
-                      x1={from.x} y1={from.y} x2={to.x} y2={to.y}
-                      stroke={isHovered ? 'var(--accent)' : 'var(--border-hard)'}
-                      strokeWidth={isHovered ? 2 : 1.25}
-                      strokeDasharray={isHovered ? undefined : '4 4'}
-                      opacity={isHovered ? 0.95 : 0.75}
-                      animate={{ opacity: isHovered ? 0.95 : 0.75 }}
-                      transition={{ duration: 0.2 }}
-                    />
-                  )
-                })}
-              </svg>
-
-              {/* Nodes */}
-              {NODES.map((node) => {
-                const cfg = TYPE_CONFIG[node.type]
-                const Icon = cfg.icon
-                const isHovered = hoveredNode === node.id
-                return (
-                  <motion.div
-                    key={node.id}
-                    initial={{ scale: 0, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    transition={{ type: 'spring', stiffness: 260, damping: 24, delay: Math.random() * 0.3 }}
-                    onHoverStart={() => setHoveredNode(node.id)}
-                    onHoverEnd={() => setHoveredNode(null)}
-                    style={{
-                      position: 'absolute',
-                      left: node.x - 22,
-                      top: node.y - 22,
-                      width: 44, height: 44,
-                      zIndex: 2,
-                    }}
+              {graphEdges.length === 0 ? (
+                <div style={{
+                  position: 'absolute',
+                  inset: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--text-tertiary)',
+                  fontSize: '0.9rem',
+                  textAlign: 'center',
+                }}>
+                  Not enough data yet
+                </div>
+              ) : (
+                <>
+                  <svg
+                    width="100%"
+                    height="440"
+                    viewBox="0 0 620 440"
+                    style={{ position: 'absolute', inset: 0 }}
                   >
-                    <motion.div
-                      whileHover={{ scale: 1.25 }}
-                      transition={{ type: 'spring', stiffness: 400, damping: 20 }}
-                      style={{
-                        width: '100%', height: '100%',
-                        borderRadius: '50%',
-                        background: cfg.bg,
-                        border: `2px solid ${cfg.color}`,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        cursor: 'pointer',
-                        boxShadow: isHovered ? `0 0 20px ${cfg.color}80` : `0 0 8px ${cfg.color}40`,
-                        transition: 'box-shadow var(--dur-base) var(--ease-in-out)',
-                      }}
-                    >
-                      <span style={{ color: cfg.color, display: 'flex' }}><Icon size={18} /></span>
-                    </motion.div>
-                    <AnimatePresence>
-                      {isHovered && (
+                    {/* Edges */}
+                    {graphEdges.map((edge, i) => {
+                      const from = graphNodes.find(n => n.id === edge.source)
+                      const to   = graphNodes.find(n => n.id === edge.target)
+                      if (!from || !to) return null
+                      const isHovered = hoveredNode === edge.source || hoveredNode === edge.target
+                      return (
+                        <motion.line
+                          key={i}
+                          x1={from.x} y1={from.y} x2={to.x} y2={to.y}
+                          stroke={isHovered ? 'var(--accent)' : 'var(--border-hard)'}
+                          strokeWidth={isHovered ? 2 : 1.25}
+                          strokeDasharray={isHovered ? undefined : '4 4'}
+                          opacity={isHovered ? 0.95 : 0.75}
+                          animate={{ opacity: isHovered ? 0.95 : 0.75 }}
+                          transition={{ duration: 0.2 }}
+                        />
+                      )
+                    })}
+                  </svg>
+
+                  {/* Nodes */}
+                  {graphNodes.map((node) => {
+                    const cfg = TYPE_CONFIG[node.type] || TYPE_CONFIG['architecture']
+                    const Icon = cfg.icon
+                    const isHovered = hoveredNode === node.id
+                    return (
+                      <motion.div
+                        key={node.id}
+                        initial={{ scale: 0, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ type: 'spring', stiffness: 260, damping: 24, delay: Math.random() * 0.3 }}
+                        onHoverStart={() => setHoveredNode(node.id)}
+                        onHoverEnd={() => setHoveredNode(null)}
+                        style={{
+                          position: 'absolute',
+                          left: node.x - 22,
+                          top: node.y - 22,
+                          width: 44, height: 44,
+                          zIndex: 2,
+                        }}
+                      >
                         <motion.div
-                          initial={{ opacity: 0, y: 6, scale: 0.9 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: 6, scale: 0.9 }}
-                          transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+                          whileHover={{ scale: 1.25 }}
+                          transition={{ type: 'spring', stiffness: 400, damping: 20 }}
                           style={{
-                            position: 'absolute',
-                            bottom: '110%', left: '50%', transform: 'translateX(-50%)',
-                            background: 'var(--bg-frosted)',
-                            backdropFilter: 'var(--blur-md)',
-                            border: '1px solid var(--border-soft)',
-                            borderRadius: 'var(--r-sm)',
-                            padding: '0.35rem 0.6rem',
-                            whiteSpace: 'nowrap',
-                            fontSize: '0.72rem',
-                            color: 'var(--text-primary)',
-                            boxShadow: 'var(--shadow-lg)',
-                            zIndex: 10,
+                            width: '100%', height: '100%',
+                            borderRadius: '50%',
+                            background: cfg.bg,
+                            border: `2px solid ${cfg.color}`,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            cursor: 'pointer',
+                            boxShadow: isHovered ? `0 0 20px ${cfg.color}80` : `0 0 8px ${cfg.color}40`,
+                            transition: 'box-shadow var(--dur-base) var(--ease-in-out)',
                           }}
                         >
-                          {node.label}
-                          <span style={{ marginLeft: 6, fontSize: '0.62rem', color: cfg.color }}>{cfg.label}</span>
+                          <span style={{ color: cfg.color, display: 'flex' }}><Icon size={18} /></span>
                         </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </motion.div>
-                )
-              })}
+                        <AnimatePresence>
+                          {isHovered && (
+                            <motion.div
+                              initial={{ opacity: 0, y: 6, scale: 0.9 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              exit={{ opacity: 0, y: 6, scale: 0.9 }}
+                              transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+                              style={{
+                                position: 'absolute',
+                                bottom: '110%', left: '50%', transform: 'translateX(-50%)',
+                                background: 'var(--bg-frosted)',
+                                backdropFilter: 'var(--blur-md)',
+                                border: '1px solid var(--border-soft)',
+                                borderRadius: 'var(--r-sm)',
+                                padding: '0.35rem 0.6rem',
+                                whiteSpace: 'nowrap',
+                                fontSize: '0.72rem',
+                                color: 'var(--text-primary)',
+                                boxShadow: 'var(--shadow-lg)',
+                                zIndex: 10,
+                              }}
+                            >
+                              {node.label}
+                              <span style={{ marginLeft: 6, fontSize: '0.62rem', color: cfg.color }}>{cfg.label}</span>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </motion.div>
+                    )
+                  })}
 
-              {/* Legend */}
-              <div style={{
-                position: 'absolute', bottom: 12, right: 16,
-                display: 'flex', gap: '0.6rem', flexWrap: 'wrap', justifyContent: 'flex-end',
-              }}>
-                {Object.entries(TYPE_CONFIG).map(([type, cfg]) => (
-                  <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: cfg.color }} />
-                    <span style={{ fontSize: '0.62rem', color: 'var(--text-tertiary)' }}>{cfg.label}</span>
+                  {/* Legend */}
+                  <div style={{
+                    position: 'absolute', bottom: 12, right: 16,
+                    display: 'flex', gap: '0.6rem', flexWrap: 'wrap', justifyContent: 'flex-end',
+                  }}>
+                    {Object.entries(TYPE_CONFIG).map(([type, cfg]) => (
+                      <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: cfg.color }} />
+                        <span style={{ fontSize: '0.62rem', color: 'var(--text-tertiary)' }}>{cfg.label}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </>
+              )}
             </GlassCard>
           </motion.div>
         )}

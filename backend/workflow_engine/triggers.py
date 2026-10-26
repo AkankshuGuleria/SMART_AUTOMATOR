@@ -9,7 +9,7 @@ Ref:     WORKFLOW_ENGINE.md §8.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from workflow_engine.executor import WorkflowExecutor
@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TriggerConfig:
     """Configuration for a workflow trigger."""
+
     id: str
     workflow: str
     event: str
@@ -54,7 +55,9 @@ class TriggerManager:
             return not self.is_confirmed(trigger_id)
         return False
 
-    def fire(self, trigger_id: str, executor: WorkflowExecutor, inputs: dict[str, Any] = None) -> dict[str, Any]:
+    def fire(
+        self, trigger_id: str, executor: WorkflowExecutor, inputs: dict[str, Any] = None
+    ) -> dict[str, Any]:
         """
         Fire a trigger to start a workflow run.
 

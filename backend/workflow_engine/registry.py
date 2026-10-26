@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
-from workflow_engine.schema import WorkflowDefinition, StepDefinition
+from workflow_engine.schema import StepDefinition, WorkflowDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,7 @@ def load_definition(path: str) -> WorkflowDefinition:
     if not file_path.exists():
         raise FileNotFoundError(f"Workflow definition not found: {path}")
 
-    with open(file_path, "r", encoding="utf-8") as f:
+    with open(file_path, encoding="utf-8") as f:
         if path.endswith(".json"):
             data = json.load(f)
         else:

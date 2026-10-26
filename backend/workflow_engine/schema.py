@@ -14,6 +14,7 @@ from typing import Any
 @dataclass(frozen=True)
 class StepDefinition:
     """A single step in a workflow definition."""
+
     id: str
     tool: str
     inputs: dict[str, Any] = field(default_factory=dict)
@@ -23,6 +24,7 @@ class StepDefinition:
 @dataclass(frozen=True)
 class WorkflowDefinition:
     """A static, named, versioned workflow definition loaded from YAML/JSON."""
+
     id: str
     name: str
     description: str
@@ -35,6 +37,7 @@ class WorkflowDefinition:
 @dataclass
 class ExecutionContext:
     """Accumulated state of a workflow run, passed step-to-step."""
+
     inputs: dict[str, Any] = field(default_factory=dict)
     step_outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
     retrieved_memories: list[dict[str, Any]] = field(default_factory=list)
@@ -45,6 +48,7 @@ class ExecutionContext:
 @dataclass
 class WorkflowRun:
     """One execution instance of a Workflow Definition."""
+
     id: str
     workflow_id: str
     workflow_version: int
@@ -59,6 +63,7 @@ class WorkflowRun:
 @dataclass
 class WorkflowStep:
     """One step within a workflow run."""
+
     id: str
     run_id: str
     step_def_id: str

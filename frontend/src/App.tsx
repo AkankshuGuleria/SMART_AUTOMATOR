@@ -10,34 +10,50 @@
  * Screens: Dashboard · AI Chat · Memory · Activity · Resources · Projects · Restore · Settings
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
+import type { Screen } from './lib/screens'
 import {
   getHealth,
+  getAiStatus,
+  listNeeds,
+  listTasks,
+  activateProject,
   getReasoningMode,
   setReasoningMode as saveReasoningMode,
+  listProjects,
+  type Project,
   type HealthStatus,
 } from './lib/api'
+import { usePolling } from './lib/usePolling'
+import { notify, onOpenScreen } from './lib/desktop'
 import FloatingSidebar from './components/layout/FloatingSidebar'
 import CommandPaletteV2 from './components/layout/CommandPaletteV2'
 
-// Screens
 import Dashboard from './screens/Dashboard'
-import AIChatScreen from './screens/AIChatScreen'
-import MemoryVisualization from './screens/MemoryVisualization'
-import ResourceUsage from './screens/ResourceUsage'
-import ProjectInsights from './screens/ProjectInsights'
-import WorkspaceRestoreScreen from './screens/WorkspaceRestoreScreen'
-import SettingsScreen from './screens/SettingsScreen'
 
-// Legacy screens (still functional, kept for backward compat)
-import ActivityFeed from './components/ActivityFeed'
-import ProjectList from './components/ProjectList'
+// Secondary screens load on first visit, keeping the startup bundle small
+// (charts/recharts only download when a chart screen is opened).
+const AIChatScreen = lazy(() => import('./screens/AIChatScreen'))
+const MemoryVisualization = lazy(() => import('./screens/MemoryVisualization'))
+const ResourceUsage = lazy(() => import('./screens/ResourceUsage'))
+const WorkspaceRestoreScreen = lazy(() => import('./screens/WorkspaceRestoreScreen'))
+const SettingsScreen = lazy(() => import('./screens/SettingsScreen'))
+const TasksScreen = lazy(() => import('./screens/TasksScreen'))
+const InboxScreen = lazy(() => import('./screens/InboxScreen'))
+const SetupScreen = lazy(() => import('./screens/SetupScreen'))
+const ActivityFeed = lazy(() => import('./components/ActivityFeed'))
+const ProjectSelector = lazy(() => import('./components/ProjectSelector'))
 
-type Screen = 'dashboard' | 'chat' | 'activity' | 'resources' | 'projects' | 'memory' | 'restore' | 'settings'
+function ScreenFallback() {
+  return (
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-tertiary)', fontSize: '0.8rem' }}>
+      Loading…
+    </div>
+  )
+}
+
 type Theme = 'dark' | 'light'
-
-const DEMO_PROJECT_ID = '2efec7e0-92db-4591-9594-026ff8399a3c'
 
 const pageVariants = {
   initial:  { opacity: 0, y: 12, filter: 'blur(4px)' },
@@ -45,11 +61,22 @@ const pageVariants = {
   exit:     { opacity: 0, y: -8, filter: 'blur(2px)', transition: { duration: 0.18, ease: [0.4, 0, 1, 1] as [number, number, number, number] } },
 }
 
+const ACTIVE_PROJECT_KEY = 'automata.activeProjectId'
+
+function readStoredProject(): string | null {
+  try { return localStorage.getItem(ACTIVE_PROJECT_KEY) } catch { return null }
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>('dashboard')
   const [health, setHealth] = useState<HealthStatus | null>(null)
   const [healthLoading, setHealthLoading] = useState(true)
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
+  const [activeProjectId, setActiveProjectIdState] = useState<string | null>(readStoredProject)
+  const [projects, setProjects] = useState<Project[]>([])
+  const [projectsLoading, setProjectsLoading] = useState(true)
+  const [pendingChat, setPendingChat] = useState<string | null>(null)
+  const [badges, setBadges] = useState<Partial<Record<Screen, number>>>({})
+  const [aiOnline, setAiOnline] = useState(true)
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false)
   const [sidebarExpanded, setSidebarExpanded] = useState(false)
   const [reasoningMode, setReasoningMode] = useState<string>('auto')
@@ -67,18 +94,33 @@ export default function App() {
     } catch { /* ignore */ }
   }
 
-  // Health polling
-  useEffect(() => {
-    let cancelled = false
-    const check = () => {
-      getHealth()
-        .then(h => { if (!cancelled) { setHealth(h); setHealthLoading(false) } })
-        .catch(() => { if (!cancelled) { setHealth(null); setHealthLoading(false) } })
-    }
-    check()
-    const id = setInterval(check, 30_000)
-    return () => { cancelled = true; clearInterval(id) }
+  const setActiveProjectId = useCallback((id: string | null) => {
+    setActiveProjectIdState(id)
+    try {
+      if (id) localStorage.setItem(ACTIVE_PROJECT_KEY, id)
+      else localStorage.removeItem(ACTIVE_PROJECT_KEY)
+    } catch { /* storage unavailable */ }
   }, [])
+
+  // Health polling (paused while the window is hidden). Fast while the agent is
+  // down — at sign-in the window opens before the backend has started.
+  const [backendEpoch, setBackendEpoch] = useState(0)
+  const wasOnline = useRef<boolean | null>(null)
+  usePolling(async () => {
+    let up = false
+    try {
+      const h = await getHealth()
+      setHealth(h)
+      up = h?.api === 'ok'
+    } catch {
+      setHealth(null)
+    } finally {
+      setHealthLoading(false)
+    }
+    // Came back online: remount screens so cards that failed to load fetch again.
+    if (up && wasOnline.current === false) setBackendEpoch(e => e + 1)
+    wasOnline.current = up
+  }, health?.api === 'ok' ? 30_000 : 3_000, [health?.api === 'ok'])
 
   // Load reasoning mode
   useEffect(() => {
@@ -86,6 +128,53 @@ export default function App() {
       .then((s: { reasoning_mode: string }) => setReasoningMode(s.reasoning_mode))
       .catch(() => {})
   }, [])
+
+  // Capture follows the selected project (file watcher, git poller, terminal).
+  useEffect(() => {
+    if (activeProjectId && health?.api === 'ok') activateProject(activeProjectId).catch(() => {})
+  }, [activeProjectId, health?.api])
+
+  // Sidebar badges (open needs, tasks waiting for approval) and online state.
+  usePolling(async () => {
+    if (health?.api !== 'ok') return
+    const [needs, tasks, ai] = await Promise.all([
+      listNeeds(activeProjectId ?? undefined).catch(() => ({ needs: [] })),
+      listTasks().catch(() => ({ tasks: [] })),
+      getAiStatus().catch(() => null),
+    ])
+    const waiting = tasks.tasks.filter(t => t.status === 'waiting_approval' || t.status === 'paused')
+    setBadges(prev => {
+      if ((prev.tasks ?? 0) < waiting.length && waiting[0]) {
+        notify('Task needs your approval', waiting[0].title)
+      }
+      if (prev.inbox !== undefined && prev.inbox < needs.needs.length) {
+        notify('AUTOMATA needs something from you', `${needs.needs.length} item(s): ${needs.needs.slice(0, 3).map(n => n.var).join(', ')}`)
+      }
+      return { inbox: needs.needs.length, tasks: waiting.length }
+    })
+    if (ai) setAiOnline(ai.online)
+  }, 20000, [activeProjectId, health?.api])
+
+  // Load projects once; keep the remembered project if it still exists.
+  // Re-runs when the backend comes back online after being offline.
+  const backendUp = health?.api === 'ok'
+  useEffect(() => {
+    if (!backendUp) return
+    let cancelled = false
+    listProjects()
+      .then(({ projects }) => {
+        if (cancelled) return
+        setProjects(projects)
+        setActiveProjectIdState(current => {
+          const next = current && projects.some(p => p.id === current) ? current : (projects[0]?.id ?? null)
+          try { if (next) localStorage.setItem(ACTIVE_PROJECT_KEY, next) } catch { /* ignore */ }
+          return next
+        })
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setProjectsLoading(false) })
+    return () => { cancelled = true }
+  }, [backendUp])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -98,6 +187,13 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // The work bar can ask the main window to open a screen (e.g. Tasks).
+  useEffect(() => {
+    let off: (() => void) | undefined
+    onOpenScreen(s => setScreen(s as Screen)).then(fn => { off = fn })
+    return () => off?.()
   }, [])
 
   const backendOnline = health?.api === 'ok'
@@ -123,6 +219,8 @@ export default function App() {
         onModeChange={handleModeChange}
         expanded={sidebarExpanded}
         onExpandedChange={setSidebarExpanded}
+        badges={badges}
+        aiOnline={aiOnline}
       />
 
       {/* ── Main content ─────────────────────────────────────────────────── */}
@@ -167,14 +265,18 @@ export default function App() {
         </AnimatePresence>
 
         {/* Screen content with transitions */}
-        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div key={backendEpoch} style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <Suspense fallback={<ScreenFallback />}>
           <AnimatePresence mode="wait">
             {screen === 'dashboard' && (
               <motion.div key="dashboard" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} {...pageVariants}>
                 <Dashboard
                   health={health}
                   healthLoading={healthLoading}
-                  projectId={activeProjectId || DEMO_PROJECT_ID}
+                  projectId={activeProjectId || undefined}
+                  projects={projects}
+                  projectsLoading={projectsLoading || healthLoading}
+                  onProjectChange={setActiveProjectId}
                   onNavigate={handleNavigate as (s: string) => void}
                 />
               </motion.div>
@@ -183,14 +285,34 @@ export default function App() {
             {screen === 'chat' && (
               <motion.div key="chat" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} {...pageVariants}>
                 <AIChatScreen
-                  projectId={activeProjectId || DEMO_PROJECT_ID}
+                  projectId={activeProjectId || undefined}
+                  initialMessage={pendingChat}
+                  onInitialMessageSent={() => setPendingChat(null)}
                 />
+              </motion.div>
+            )}
+
+            {screen === 'tasks' && (
+              <motion.div key="tasks" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} {...pageVariants}>
+                <TasksScreen projectId={activeProjectId ?? undefined} onOpenInbox={() => handleNavigate('inbox')} />
+              </motion.div>
+            )}
+
+            {screen === 'inbox' && (
+              <motion.div key="inbox" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} {...pageVariants}>
+                <InboxScreen projectId={activeProjectId ?? undefined} />
+              </motion.div>
+            )}
+
+            {screen === 'setup' && (
+              <motion.div key="setup" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} {...pageVariants}>
+                <SetupScreen />
               </motion.div>
             )}
 
             {screen === 'memory' && (
               <motion.div key="memory" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} {...pageVariants}>
-                <MemoryVisualization />
+                <MemoryVisualization projectId={activeProjectId ?? undefined} />
               </motion.div>
             )}
 
@@ -199,56 +321,36 @@ export default function App() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
                   <h1>Activity Feed</h1>
                   {activeProjectId && (
-                    <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>
-                      {activeProjectId.slice(0, 8)}…
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
+                      {projects.find(p => p.id === activeProjectId)?.name ?? ''}
                     </span>
                   )}
                 </div>
-                <ActivityFeed
-                  projectId={activeProjectId || DEMO_PROJECT_ID}
-                  onClearBadge={() => {}}
-                />
+                <ActivityFeed projectId={activeProjectId ?? undefined} />
               </motion.div>
             )}
 
             {screen === 'resources' && (
               <motion.div key="resources" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} {...pageVariants}>
-                <ResourceUsage />
+                <ResourceUsage projectId={activeProjectId || undefined} />
               </motion.div>
             )}
 
             {screen === 'projects' && (
-              <motion.div key="projects" style={{ flex: 1, overflow: 'auto', padding: '1.5rem' }} {...pageVariants}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                  <h1>Projects</h1>
-                  {activeProjectId && (
-                    <button
-                      onClick={() => setActiveProjectId(null)}
-                      style={{
-                        padding: '0.4rem 0.85rem',
-                        borderRadius: 'var(--r-sm)',
-                        border: '1px solid var(--border-soft)',
-                        background: 'var(--bg-elevated)',
-                        color: 'var(--text-secondary)',
-                        fontSize: '0.78rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      ← Back to Project List
-                    </button>
-                  )}
-                </div>
-                {activeProjectId ? (
-                  <ProjectInsights />
-                ) : (
-                  <ProjectList onOpen={id => { setActiveProjectId(id); setScreen('chat') }} />
-                )}
+              <motion.div key="projects" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} {...pageVariants}>
+                <ProjectSelector
+                  activeProjectId={activeProjectId}
+                  projects={projects}
+                  onProjectSelect={setActiveProjectId}
+                  onProjectAdded={(p) => { setProjects(prev => [...prev, p]); setActiveProjectId(p.id); }}
+                  onProjectsChange={setProjects}
+                />
               </motion.div>
             )}
 
             {screen === 'restore' && (
               <motion.div key="restore" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} {...pageVariants}>
-                <WorkspaceRestoreScreen />
+                <WorkspaceRestoreScreen projectId={activeProjectId ?? undefined} />
               </motion.div>
             )}
 
@@ -263,6 +365,7 @@ export default function App() {
               </motion.div>
             )}
           </AnimatePresence>
+          </Suspense>
         </div>
 
         {/* Ctrl+K hint floating pill */}
@@ -308,7 +411,8 @@ export default function App() {
           <CommandPaletteV2
             onClose={() => setCmdPaletteOpen(false)}
             onNavigate={(s: Screen) => { handleNavigate(s); setCmdPaletteOpen(false) }}
-            projectId={activeProjectId || DEMO_PROJECT_ID}
+            projectId={activeProjectId ?? undefined}
+            onChatMessage={setPendingChat}
           />
         )}
       </AnimatePresence>

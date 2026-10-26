@@ -2,7 +2,6 @@
 tests/test_tools.py — AUTOMATA Decision Engine tool registry tests.
 """
 
-import json
 import os
 import tempfile
 from unittest.mock import MagicMock, patch

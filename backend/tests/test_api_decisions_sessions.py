@@ -7,7 +7,6 @@ POST /projects/{project_id}/sessions/end endpoints.
 
 from unittest.mock import patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 from api.server import app

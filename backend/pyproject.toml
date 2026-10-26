@@ -27,9 +27,16 @@ dependencies = [
     "rich>=13.0.0",
     # Token counting for prompt budget management (SKILLS.md §5)
     "tiktoken>=0.9.0",
+    "psutil>=6.0.0",
+    "nvidia-ml-py>=12.535.0",
+    "comtypes>=1.4.0",
 ]
 
 [project.optional-dependencies]
+# Offline semantic search without Ollama (~60 MB package + 130 MB model on first use).
+local-ai = [
+    "fastembed>=0.4.0",
+]
 dev = [
     # ── SKILLS.md §1 Testing ──────────────────────────────────────────────────
     "pytest>=8.0.0",
@@ -69,16 +76,19 @@ show_missing = true
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "S"]   # added S = flake8-bandit (security checks)
 ignore = [
     "S101",  # assert statements are fine in tests
 ]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S", "B"]   # relax security/bugbear in test files
 "ai/bedrock_client.py" = ["S310"]  # intentional HTTP API calls to LLM services
 "automation/os_windows.py" = ["S603", "S607"]  # intentional subprocess calls for OS automation
 "memory/retrieval.py" = ["S608"]  # validated SQL construction
+"api/*.py" = ["B008"]  # FastAPI Body() defaults are the documented idiom
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

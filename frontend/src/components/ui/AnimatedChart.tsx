@@ -14,7 +14,7 @@ import { motion } from 'framer-motion'
 
 // Custom Tooltip
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function AutomataTooltip({ active, payload, label }: any) {
+function AutomataTooltip({ active, payload, label, formatValue }: any) {
   if (!active || !payload?.length) return null
   return (
     <div style={{
@@ -32,7 +32,7 @@ function AutomataTooltip({ active, payload, label }: any) {
         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.color, flexShrink: 0 }} />
           <span style={{ color: 'var(--text-secondary)' }}>{p.name}:</span>
-          <span style={{ fontWeight: 600 }}>{p.value}</span>
+          <span style={{ fontWeight: 600 }}>{formatValue ? formatValue(p.value) : p.value}</span>
         </div>
       ))}
     </div>
@@ -44,6 +44,10 @@ interface ChartBaseProps {
   height?: number
   title?: string
   className?: string
+  /** Set false for charts that refresh every few seconds. */
+  animate?: boolean
+  formatValue?: (value: number) => string
+  yDomain?: [number, number]
 }
 
 // ─── Line Chart ──────────────────────────────────────────────────────────────
@@ -53,7 +57,7 @@ interface LineChartProps extends ChartBaseProps {
   gridLines?: boolean
 }
 
-export function ATLineChart({ data, lines, xKey = 'name', height = 200, title, gridLines = true }: LineChartProps) {
+export function ATLineChart({ data, lines, xKey = 'name', height = 200, title, gridLines = true, animate = true, formatValue, yDomain }: LineChartProps) {
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}>
       {title && <h4 style={{ marginBottom: '0.75rem', color: 'var(--text-secondary)', fontSize: '0.8rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{title}</h4>}
@@ -61,8 +65,8 @@ export function ATLineChart({ data, lines, xKey = 'name', height = 200, title, g
         <LineChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
           {gridLines && <CartesianGrid strokeDasharray="3 3" stroke="var(--border-soft)" vertical={false} />}
           <XAxis dataKey={xKey} tick={{ fontSize: 10, fill: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ fontSize: 10, fill: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} />
-          <Tooltip content={<AutomataTooltip />} />
+          <YAxis domain={yDomain} tick={{ fontSize: 10, fill: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} tickFormatter={formatValue} />
+          <Tooltip content={<AutomataTooltip formatValue={formatValue} />} />
           {lines.map(l => (
             <Line
               key={l.key}
@@ -73,6 +77,7 @@ export function ATLineChart({ data, lines, xKey = 'name', height = 200, title, g
               strokeWidth={2}
               dot={false}
               activeDot={{ r: 4, strokeWidth: 0 }}
+              isAnimationActive={animate}
               animationDuration={1200}
               animationEasing="ease-out"
             />
@@ -90,7 +95,7 @@ interface AreaChartProps extends ChartBaseProps {
   stacked?: boolean
 }
 
-export function ATAreaChart({ data, areas, xKey = 'name', height = 200, title, stacked = false }: AreaChartProps) {
+export function ATAreaChart({ data, areas, xKey = 'name', height = 200, title, stacked = false, animate = true, formatValue, yDomain }: AreaChartProps) {
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}>
       {title && <h4 style={{ marginBottom: '0.75rem', color: 'var(--text-secondary)', fontSize: '0.8rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{title}</h4>}
@@ -106,8 +111,8 @@ export function ATAreaChart({ data, areas, xKey = 'name', height = 200, title, s
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border-soft)" vertical={false} />
           <XAxis dataKey={xKey} tick={{ fontSize: 10, fill: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ fontSize: 10, fill: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} />
-          <Tooltip content={<AutomataTooltip />} />
+          <YAxis domain={yDomain} tick={{ fontSize: 10, fill: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} tickFormatter={formatValue} />
+          <Tooltip content={<AutomataTooltip formatValue={formatValue} />} />
           {stacked && <Legend wrapperStyle={{ fontSize: 11, color: 'var(--text-secondary)' }} />}
           {areas.map(a => (
             <Area
@@ -119,6 +124,7 @@ export function ATAreaChart({ data, areas, xKey = 'name', height = 200, title, s
               fill={`url(#grad-${a.key})`}
               strokeWidth={2}
               stackId={stacked ? 'stack' : undefined}
+              isAnimationActive={animate}
               animationDuration={1200}
               animationEasing="ease-out"
             />
@@ -136,7 +142,7 @@ interface ATBarChartProps extends ChartBaseProps {
   horizontal?: boolean
 }
 
-export function ATBarChart({ data, bars, xKey = 'name', height = 200, title, horizontal = false }: ATBarChartProps) {
+export function ATBarChart({ data, bars, xKey = 'name', height = 200, title, horizontal = false, animate = true, formatValue }: ATBarChartProps) {
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}>
       {title && <h4 style={{ marginBottom: '0.75rem', color: 'var(--text-secondary)', fontSize: '0.8rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{title}</h4>}
@@ -145,13 +151,13 @@ export function ATBarChart({ data, bars, xKey = 'name', height = 200, title, hor
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border-soft)" horizontal={!horizontal} vertical={horizontal} />
           {horizontal
             ? <><YAxis dataKey={xKey} type="category" tick={{ fontSize: 10, fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} width={80} />
-                <XAxis type="number" tick={{ fontSize: 10, fill: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} /></>
+                <XAxis type="number" tick={{ fontSize: 10, fill: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} tickFormatter={formatValue} /></>
             : <><XAxis dataKey={xKey} tick={{ fontSize: 10, fill: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} /></>
+                <YAxis tick={{ fontSize: 10, fill: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} tickFormatter={formatValue} /></>
           }
-          <Tooltip content={<AutomataTooltip />} />
+          <Tooltip content={<AutomataTooltip formatValue={formatValue} />} />
           {bars.map(b => (
-            <Bar key={b.key} dataKey={b.key} name={b.label ?? b.key} fill={b.color} radius={[4, 4, 0, 0]} maxBarSize={32} animationDuration={1000} animationEasing="ease-out" />
+            <Bar key={b.key} dataKey={b.key} name={b.label ?? b.key} fill={b.color} radius={[4, 4, 0, 0]} maxBarSize={32} isAnimationActive={animate} animationDuration={1000} animationEasing="ease-out" />
           ))}
         </BarChart>
       </ResponsiveContainer>

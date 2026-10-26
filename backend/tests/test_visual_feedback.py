@@ -6,7 +6,18 @@ read_visible_context, diagnose_visible_error, review_visible_design,
 generate_prompt_from_screen, verify_visible_result.
 """
 
+import pytest
+
 from decision_engine.tools import execute_tool, get_tool
+
+
+@pytest.fixture(autouse=True)
+def _no_real_screen(monkeypatch):
+    """Never read the developer's real screen during tests."""
+    monkeypatch.setattr(
+        "automation.desktop.capture",
+        lambda **kwargs: {"success": False, "error": "capture disabled in tests"},
+    )
 
 
 def test_capture_screen_tool_registered() -> None:

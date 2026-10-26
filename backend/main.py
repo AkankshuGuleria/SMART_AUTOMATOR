@@ -8,68 +8,20 @@ Ref:     ARCHITECTURE.md §3.2, CONVENTIONS.md §4.
 """
 
 import logging
-import threading
 
 import uvicorn
 
+from automation.no_console import install as _hide_child_consoles
 from logging_config import configure_logging
 
+# Before anything can start a subprocess: no console windows popping up.
+_hide_child_consoles()
 configure_logging()
 
 from config import settings  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-
-def _start_background_watchers() -> None:
-    """
-    Launch background daemon threads for the Persistent Memory Engine capture pipeline.
-    
-    Daemon threads are used so they do not block process shutdown when the
-    uvicorn server receives SIGTERM/SIGINT. Each thread is responsible for one
-    capture source and writes through db/client.py — never directly to CockroachDB.
-    
-    Phase 0: threads are imported but not started (capture.py was a stub).
-    Phase 1: uncomment and wire up real capture threads here.
-    """
-    from memory.capture import FileWatcherThread, GitPollerThread, TerminalCaptureThread
-    
-    threads: list[threading.Thread] = []
-    
-    # File watcher — watches project files for changes
-    if settings.db_available:
-        fw = FileWatcherThread(
-            project_id="2efec7e0-92db-4591-9594-026ff8399a3c",
-            project_path="D:/AUTOMATA",
-            session_id=None,
-            daemon=True,
-        )
-        threads.append(fw)
-    
-    # Git poller — polls for new commits
-    if settings.db_available:
-        gp = GitPollerThread(
-            project_id="2efec7e0-92db-4591-9594-026ff8399a3c",
-            project_path="D:/AUTOMATA",
-            session_id=None,
-            daemon=True,
-        )
-        threads.append(gp)
-    
-    # Terminal capture — captures PowerShell history
-    tc = TerminalCaptureThread(
-        project_id="2efec7e0-92db-4591-9594-026ff8399a3c",
-        session_id=None,
-        daemon=True,
-    )
-    threads.append(tc)
-    
-    for t in threads:
-        t.start()
-        logger.info("Started background thread: %s", t.name)
-    
-    if not threads:
-        logger.info("Background watcher threads: DB not configured — not started")
 
 def main() -> None:
     logger.info("AUTOMATA agent starting up")
@@ -80,8 +32,9 @@ def main() -> None:
         settings.embedding_available,
     )
 
-    _start_background_watchers()
-
+    # Capture threads, memory sync, snapshots, the usage tracker and the system
+    # sampler all start inside the API lifespan (api/server.py) so they run the
+    # same way under `python main.py` and `uvicorn api.server:app`.
     logger.info("Starting FastAPI server on http://127.0.0.1:8000")
     uvicorn.run(
         "api.server:app",
@@ -91,6 +44,7 @@ def main() -> None:
         log_config=None,  # Suppress uvicorn's default logging — we use our own
         access_log=True,
     )
+
 
 if __name__ == "__main__":
     main()

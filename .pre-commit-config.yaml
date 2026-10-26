@@ -24,7 +24,7 @@ repos:
 
   # ── SKILLS.md §4 §2 — Linting + code quality ─────────────────────────────
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.0
+    rev: v0.16.0
     hooks:
       - id: ruff
         name: "ruff: lint Python"

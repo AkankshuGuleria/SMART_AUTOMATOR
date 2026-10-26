@@ -52,8 +52,10 @@ def _is_filled(value: str | None) -> bool:
 
 def collect_status(phase: str, env_path: Path = BACKEND_ENV) -> tuple[list[str], list[str]]:
     file_values = _load_env_file(env_path)
-    env_values = {key: value for key, value in os.environ.items() if key in file_values}
-    merged = {**file_values, **env_values}
+
+    def lookup(key: str) -> str | None:
+        # A non-empty process variable wins; an empty one falls back to the file.
+        return os.environ.get(key) or file_values.get(key)
 
     required: list[str] = []
     for name, keys in REQUIRED_BY_PHASE.items():
@@ -64,14 +66,14 @@ def collect_status(phase: str, env_path: Path = BACKEND_ENV) -> tuple[list[str],
     ok: list[str] = []
     missing: list[str] = []
     for key in required:
-        value = os.environ.get(key, merged.get(key))
+        value = lookup(key)
         if _is_filled(value):
             ok.append(key)
         else:
             missing.append(key)
 
     for key in OPTIONAL_SECRET_KEYS:
-        value = os.environ.get(key, merged.get(key))
+        value = lookup(key)
         if _is_filled(value):
             ok.append(key)
 
