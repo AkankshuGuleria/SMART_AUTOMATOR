@@ -66,6 +66,9 @@ AUTOMATA/
 │   │   └── definitions/           # Versioned YAML workflow definitions
 │   │       ├── chatgpt_prompt_handoff_v1.yaml
 │   │       └── pr_review_v1.yaml
+│   ├── intelligence/              # Project profile (stack, run book, env, modules), env providers
+│   ├── workspace/                 # Capture manager (active project), snapshots + resume
+│   ├── tasks/                     # Delegation task engine, task/needs store, Needs inbox
 │   ├── monitoring/                # Local telemetry (no network)
 │   │   ├── system_metrics.py      # CPU/GPU/RAM/disk/network sampler
 │   │   └── app_usage.py           # Foreground-app tracker + usage analysis (SQLite)

@@ -10,10 +10,15 @@
  * Screens: Dashboard · AI Chat · Memory · Activity · Resources · Projects · Restore · Settings
  */
 
-import { useState, useEffect, useCallback, lazy, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
+import type { Screen } from './lib/screens'
 import {
   getHealth,
+  getAiStatus,
+  listNeeds,
+  listTasks,
+  activateProject,
   getReasoningMode,
   setReasoningMode as saveReasoningMode,
   listProjects,
@@ -21,6 +26,7 @@ import {
   type HealthStatus,
 } from './lib/api'
 import { usePolling } from './lib/usePolling'
+import { notify, onOpenScreen } from './lib/desktop'
 import FloatingSidebar from './components/layout/FloatingSidebar'
 import CommandPaletteV2 from './components/layout/CommandPaletteV2'
 
@@ -33,6 +39,9 @@ const MemoryVisualization = lazy(() => import('./screens/MemoryVisualization'))
 const ResourceUsage = lazy(() => import('./screens/ResourceUsage'))
 const WorkspaceRestoreScreen = lazy(() => import('./screens/WorkspaceRestoreScreen'))
 const SettingsScreen = lazy(() => import('./screens/SettingsScreen'))
+const TasksScreen = lazy(() => import('./screens/TasksScreen'))
+const InboxScreen = lazy(() => import('./screens/InboxScreen'))
+const SetupScreen = lazy(() => import('./screens/SetupScreen'))
 const ActivityFeed = lazy(() => import('./components/ActivityFeed'))
 const ProjectSelector = lazy(() => import('./components/ProjectSelector'))
 
@@ -44,7 +53,6 @@ function ScreenFallback() {
   )
 }
 
-type Screen = 'dashboard' | 'chat' | 'activity' | 'resources' | 'projects' | 'memory' | 'restore' | 'settings'
 type Theme = 'dark' | 'light'
 
 const pageVariants = {
@@ -67,6 +75,8 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([])
   const [projectsLoading, setProjectsLoading] = useState(true)
   const [pendingChat, setPendingChat] = useState<string | null>(null)
+  const [badges, setBadges] = useState<Partial<Record<Screen, number>>>({})
+  const [aiOnline, setAiOnline] = useState(true)
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false)
   const [sidebarExpanded, setSidebarExpanded] = useState(false)
   const [reasoningMode, setReasoningMode] = useState<string>('auto')
@@ -92,16 +102,25 @@ export default function App() {
     } catch { /* storage unavailable */ }
   }, [])
 
-  // Health polling (paused while the window is hidden)
+  // Health polling (paused while the window is hidden). Fast while the agent is
+  // down — at sign-in the window opens before the backend has started.
+  const [backendEpoch, setBackendEpoch] = useState(0)
+  const wasOnline = useRef<boolean | null>(null)
   usePolling(async () => {
+    let up = false
     try {
-      setHealth(await getHealth())
+      const h = await getHealth()
+      setHealth(h)
+      up = h?.api === 'ok'
     } catch {
       setHealth(null)
     } finally {
       setHealthLoading(false)
     }
-  }, 30_000)
+    // Came back online: remount screens so cards that failed to load fetch again.
+    if (up && wasOnline.current === false) setBackendEpoch(e => e + 1)
+    wasOnline.current = up
+  }, health?.api === 'ok' ? 30_000 : 3_000, [health?.api === 'ok'])
 
   // Load reasoning mode
   useEffect(() => {
@@ -109,6 +128,32 @@ export default function App() {
       .then((s: { reasoning_mode: string }) => setReasoningMode(s.reasoning_mode))
       .catch(() => {})
   }, [])
+
+  // Capture follows the selected project (file watcher, git poller, terminal).
+  useEffect(() => {
+    if (activeProjectId && health?.api === 'ok') activateProject(activeProjectId).catch(() => {})
+  }, [activeProjectId, health?.api])
+
+  // Sidebar badges (open needs, tasks waiting for approval) and online state.
+  usePolling(async () => {
+    if (health?.api !== 'ok') return
+    const [needs, tasks, ai] = await Promise.all([
+      listNeeds(activeProjectId ?? undefined).catch(() => ({ needs: [] })),
+      listTasks().catch(() => ({ tasks: [] })),
+      getAiStatus().catch(() => null),
+    ])
+    const waiting = tasks.tasks.filter(t => t.status === 'waiting_approval' || t.status === 'paused')
+    setBadges(prev => {
+      if ((prev.tasks ?? 0) < waiting.length && waiting[0]) {
+        notify('Task needs your approval', waiting[0].title)
+      }
+      if (prev.inbox !== undefined && prev.inbox < needs.needs.length) {
+        notify('AUTOMATA needs something from you', `${needs.needs.length} item(s): ${needs.needs.slice(0, 3).map(n => n.var).join(', ')}`)
+      }
+      return { inbox: needs.needs.length, tasks: waiting.length }
+    })
+    if (ai) setAiOnline(ai.online)
+  }, 20000, [activeProjectId, health?.api])
 
   // Load projects once; keep the remembered project if it still exists.
   // Re-runs when the backend comes back online after being offline.
@@ -144,6 +189,13 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // The work bar can ask the main window to open a screen (e.g. Tasks).
+  useEffect(() => {
+    let off: (() => void) | undefined
+    onOpenScreen(s => setScreen(s as Screen)).then(fn => { off = fn })
+    return () => off?.()
+  }, [])
+
   const backendOnline = health?.api === 'ok'
 
   const handleNavigate = (s: Screen) => {
@@ -167,6 +219,8 @@ export default function App() {
         onModeChange={handleModeChange}
         expanded={sidebarExpanded}
         onExpandedChange={setSidebarExpanded}
+        badges={badges}
+        aiOnline={aiOnline}
       />
 
       {/* ── Main content ─────────────────────────────────────────────────── */}
@@ -211,7 +265,7 @@ export default function App() {
         </AnimatePresence>
 
         {/* Screen content with transitions */}
-        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div key={backendEpoch} style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <Suspense fallback={<ScreenFallback />}>
           <AnimatePresence mode="wait">
             {screen === 'dashboard' && (
@@ -235,6 +289,24 @@ export default function App() {
                   initialMessage={pendingChat}
                   onInitialMessageSent={() => setPendingChat(null)}
                 />
+              </motion.div>
+            )}
+
+            {screen === 'tasks' && (
+              <motion.div key="tasks" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} {...pageVariants}>
+                <TasksScreen projectId={activeProjectId ?? undefined} onOpenInbox={() => handleNavigate('inbox')} />
+              </motion.div>
+            )}
+
+            {screen === 'inbox' && (
+              <motion.div key="inbox" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} {...pageVariants}>
+                <InboxScreen projectId={activeProjectId ?? undefined} />
+              </motion.div>
+            )}
+
+            {screen === 'setup' && (
+              <motion.div key="setup" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} {...pageVariants}>
+                <SetupScreen />
               </motion.div>
             )}
 

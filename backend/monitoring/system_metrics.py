@@ -32,7 +32,7 @@ DEMAND_WINDOW_S = 30.0  # a read keeps the sampler fast for this long
 PROCESS_SCAN_TTL_S = 8.0
 HISTORY_POINTS = 180  # 6 min at the fast interval
 TOP_PROCESS_COUNT = 8
-GPU_STALE_S = 15.0  # how long a cached GPU reading may stand in for a failed read
+GPU_STALE_S = 60.0  # how long a cached GPU reading may stand in for a failed read
 
 
 class _GpuReader:
@@ -77,7 +77,23 @@ class _GpuReader:
                 ("power_watts", lambda h: round(nv.nvmlDeviceGetPowerUsage(h) / 1000, 1)),
             ):
                 try:
-                    value = fn(handle)
+                    try:
+                        value = fn(handle)
+                    except Exception:
+                        if key != "utilization_percent":
+                            raise
+                        # Laptop GPUs answer utilization only every ~2.5 s; retry briefly
+                        # (this runs in the background sampler thread, never a request).
+                        value = None
+                        for _ in range(3):
+                            time.sleep(0.4)
+                            try:
+                                value = fn(handle)
+                                break
+                            except Exception:
+                                continue
+                        if value is None:
+                            raise
                     entry[key] = value.decode() if isinstance(value, bytes) else value
                     self._last_good[(index, key)] = (entry[key], time.monotonic())
                 except Exception:

@@ -8,7 +8,7 @@ import { defaultContainer, defaultItem } from '../components/ui/VariantHelpers'
 const container = defaultContainer
 const item = defaultItem
 import {
-  Gauge, Shield, TrendingUp,
+  KeyRound, FlaskConical, TrendingUp, Shield,
   CheckCircle2, AlertTriangle, Circle, GitBranch,
 } from 'lucide-react'
 import GlassCard from '../components/ui/GlassCard'
@@ -17,26 +17,21 @@ import { ATLineChart, ATBarChart, ATDonutChart } from '../components/ui/Animated
 import {
   listProjects,
   getProjectAnalytics,
-  getLiveMetrics,
-  getHealth,
   getDecisions,
-  type HealthStatus,
+  getProjectProfile,
   type AnalyticsData,
-  type Project,
   type DecisionEntry,
-  type LiveMetrics,
+  type ProjectProfile,
 } from '../lib/api'
 import { usePolling } from '../lib/usePolling'
+import ProjectProfileCard from '../components/ProjectProfileCard'
 
 interface ProjectInsightsProps {
   projectId?: string
 }
 
 export default function ProjectInsights({ projectId: _projectId }: ProjectInsightsProps) {
-  const [project] = useState<Project | null>(null)
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null)
-  const [health, setHealth] = useState<HealthStatus | null>(null)
-  const [liveMetrics, setLiveMetrics] = useState<LiveMetrics | null>(null)
   const [decisions, setDecisions] = useState<DecisionEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingDecisions, setLoadingDecisions] = useState(true)
@@ -73,14 +68,6 @@ export default function ProjectInsights({ projectId: _projectId }: ProjectInsigh
   }, 30000, [projectId], !!projectId)
 
   usePolling(async () => {
-    setHealth(await getHealth())
-  }, 30000)
-
-  usePolling(async () => {
-    if (projectId) setLiveMetrics(await getLiveMetrics(projectId))
-  }, 15000, [projectId], !!projectId)
-
-  usePolling(async () => {
     if (!projectId) return
     try {
       const { decisions } = await getDecisions(projectId, 10)
@@ -93,34 +80,32 @@ export default function ProjectInsights({ projectId: _projectId }: ProjectInsigh
     }
   }, 30000, [projectId], !!projectId)
 
+  const [profile, setProfile] = useState<ProjectProfile | null>(null)
+  usePolling(async () => {
+    if (projectId) setProfile(await getProjectProfile(projectId))
+  }, 120000, [projectId], !!projectId)
+  const envVars = profile?.env.variables ?? []
+  const envMissing = envVars.filter(v => !v.set)
+
   const completionPct = useMemo(() => {
     if (!analytics) return 0
     const { total, completed } = analytics.todo_stats
     if (total <= 0) return 0
     return Math.round((completed / total) * 100)
   }, [analytics])
+  // With no tracked tasks, show readiness from this project's own modules instead of a fake 0%.
+  const hasTasks = (analytics?.todo_stats.total ?? 0) > 0
+  const modules = profile?.modules ?? []
+  const readiness = modules.length ? Math.round(modules.reduce((s, m) => s + m.pct, 0) / modules.length) : null
+  const ringValue = hasTasks ? completionPct : readiness ?? 0
+  const ringLabel = hasTasks ? `${completionPct}%` : readiness === null ? '—' : `${readiness}%`
+  const ringSub = hasTasks ? 'tasks done' : 'ready'
+  const ringCaption = hasTasks ? 'Task completion' : 'Readiness (avg. of modules)'
 
   const tasksRemaining = analytics?.todo_stats.pending || 0
 
-  const commitsTotal = analytics?.commits_over_time?.reduce((sum, c) => sum + c.count, 0) || 0
-  const editsTotal = analytics?.file_edits_over_time?.reduce((sum, c) => sum + c.count, 0) || 0
-  const sessionCount = analytics?.session_stats?.total_sessions || 0
-
-  const aiConfidence = useMemo(() => {
-    if (!health) return 0
-    let score = 0
-    if (health.api === 'ok') score += 25
-    if (health.db?.db === 'connected') score += 25
-    if (health.bedrock === 'configured') score += 25
-    if (health.embedding === 'configured') score += 25
-    return score
-  }, [health])
 
   const openDecisions = decisions.length
-  const memoryHealth = liveMetrics
-    ? Math.round(Math.min(100, 40 + liveMetrics.memory.events_last_hour * 5 + liveMetrics.memory.decisions * 2))
-    : (health?.db?.db === 'connected' ? 70 : 0)
-
   const completionDonut = useMemo(() => {
     const completed = analytics?.todo_stats.completed || 0
     const pending = analytics?.todo_stats.pending || 0
@@ -130,31 +115,6 @@ export default function ProjectInsights({ projectId: _projectId }: ProjectInsigh
     ]
   }, [analytics])
 
-  const featureProgress = useMemo(() => {
-    const embeddingOk = health?.embedding === 'configured'
-    const bedrockOk = health?.bedrock === 'configured'
-
-    return [
-      { name: 'Memory Engine',     pct: Math.min(95, 40 + commitsTotal * 5 + editsTotal * 2), color: '#10b981' },
-      { name: 'Vector Search',     pct: embeddingOk ? 88 : 0, color: '#22d3ee' },
-      { name: 'Reasoning Engine',  pct: bedrockOk ? 72 : 0, color: '#a78bfa' },
-      { name: 'Automation Layer',  pct: Math.min(90, 20 + sessionCount * 15), color: '#f59e0b' },
-      { name: 'UI / Dashboard',    pct: Math.min(80, 20 + (analytics?.top_files?.length || 0) * 10 + editsTotal * 2), color: '#6c4fff' },
-      { name: 'TODO Tracking',     pct: analytics?.todo_stats.total ? Math.round((analytics.todo_stats.completed / analytics.todo_stats.total) * 100) : 0, color: '#ec4899' },
-      { name: 'Decision Engine',   pct: 10, color: '#6b7280' },
-    ]
-  }, [health, analytics, commitsTotal, editsTotal, sessionCount])
-
-  const repoHealth = useMemo(() => {
-    if (!health) return []
-    return [
-      { label: 'Backend API', ok: health.api === 'ok' },
-      { label: 'CockroachDB', ok: health.db?.db === 'connected', value: health.db?.db === 'connected' ? 'Connected' : (health.db?.reason || 'Disconnected') },
-      { label: 'Bedrock Configured', ok: health.bedrock === 'configured' },
-      { label: 'Embeddings Configured', ok: health.embedding === 'configured' },
-    ]
-  }, [health])
-
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       {/* Header */}
@@ -163,11 +123,13 @@ export default function ProjectInsights({ projectId: _projectId }: ProjectInsigh
           <div>
             <h1 style={{ marginBottom: '0.2rem' }}>Project Insights</h1>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-tertiary)' }}>
-              {project ? project.name : 'Loading…'}
+              Detected from this project's files and captured activity.
             </p>
           </div>
         </div>
       </motion.div>
+
+      <ProjectProfileCard projectId={projectId ?? undefined} />
 
       {/* ── Hero: Completion + Key Stats ─────────────────────────────────── */}
       <motion.div
@@ -188,24 +150,24 @@ export default function ProjectInsights({ projectId: _projectId }: ProjectInsigh
         {/* Completion ring */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
           <ProgressRing
-            value={loading ? 0 : completionPct}
+            value={loading ? 0 : ringValue}
             size={120}
             stroke={10}
             gradient={['var(--accent)', 'var(--ai-cyan)']}
             glow
-            label={loading ? '—' : `${completionPct}%`}
-            sublabel={loading ? '' : 'complete'}
+            label={loading ? '—' : ringLabel}
+            sublabel={loading ? '' : ringSub}
           />
-          <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>Overall Completion</span>
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>{ringCaption}</span>
         </div>
 
         {/* Key metrics */}
         <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem' }}>
           {[
             { label: 'Tasks Remaining', value: loading ? '—' : `${tasksRemaining}`, icon: Circle, color: 'var(--warning)' },
-            { label: 'AI Confidence', value: loading ? '—' : `${aiConfidence}%`, icon: Gauge, color: 'var(--ai-cyan)' },
+            { label: 'Env vars to set', value: profile ? `${envMissing.length}` : '—', icon: KeyRound, color: envMissing.length ? 'var(--warning)' : 'var(--success)' },
             { label: 'Open Decisions', value: loading ? '—' : `${openDecisions}`, icon: TrendingUp, color: 'var(--accent)' },
-            { label: 'Memory Health', value: health ? `${memoryHealth}%` : '—', icon: Shield, color: memoryHealth > 0 ? 'var(--success)' : 'var(--warning)' },
+            { label: 'Test files', value: profile ? `${profile.tests.files}` : '—', icon: FlaskConical, color: profile?.tests.files ? 'var(--success)' : 'var(--warning)' },
           ].map(stat => {
             const Icon = stat.icon
             return (
@@ -267,8 +229,8 @@ export default function ProjectInsights({ projectId: _projectId }: ProjectInsigh
               title="TODO Breakdown"
               data={completionDonut}
               size={160}
-              label={loading ? '—' : `${completionPct}%`}
-              sublabel={loading ? '' : 'done'}
+              label={loading ? '—' : hasTasks ? `${completionPct}%` : '—'}
+              sublabel={loading ? '' : hasTasks ? 'done' : 'no TODOs'}
             />
           </GlassCard>
         </motion.div>
@@ -286,38 +248,6 @@ export default function ProjectInsights({ projectId: _projectId }: ProjectInsigh
             />
           </GlassCard>
         </motion.div>
-      </motion.div>
-
-      {/* Feature progress */}
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3, type: 'spring', stiffness: 200, damping: 24 }}>
-        <GlassCard hoverable>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '1rem' }}>
-            <TrendingUp size={15} color="var(--accent-2)" />
-            <h3 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Module Health</h3>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-            {featureProgress.map((f, i) => (
-              <motion.div
-                key={f.name}
-                initial={{ opacity: 0, x: -16 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.1 + i * 0.05, type: 'spring', stiffness: 300, damping: 26 }}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}
-              >
-                <span style={{ width: 160, fontSize: '0.78rem', color: 'var(--text-secondary)', flexShrink: 0, whiteSpace: 'nowrap' }}>{f.name}</span>
-                <div style={{ flex: 1, height: 6, background: 'var(--bg-elevated)', borderRadius: 99, overflow: 'hidden' }}>
-                  <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: `${f.pct}%` }}
-                    transition={{ duration: 0.9, delay: 0.2 + i * 0.05, ease: [0.16, 1, 0.3, 1] }}
-                    style={{ height: '100%', background: f.color, borderRadius: 99 }}
-                  />
-                </div>
-                <span style={{ width: 36, fontSize: '0.72rem', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', textAlign: 'right' }}>{f.pct}%</span>
-              </motion.div>
-            ))}
-          </div>
-        </GlassCard>
       </motion.div>
 
       {/* Recent Decisions */}
@@ -366,35 +296,31 @@ export default function ProjectInsights({ projectId: _projectId }: ProjectInsigh
         </GlassCard>
       </motion.div>
 
-      {/* Repo health */}
+      {/* Requirements detected from this project's files */}
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4, type: 'spring', stiffness: 200, damping: 24 }}>
         <GlassCard hoverable>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '1rem' }}>
             <Shield size={15} color="var(--text-tertiary)" />
-            <h3 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Repository Health</h3>
+            <h3 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Requirements</h3>
+            <span style={{ fontSize: '0.68rem', color: 'var(--text-tertiary)' }}>environment variables this project uses</span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.5rem' }}>
-            {repoHealth.map((r, i) => (
-              <motion.div
-                key={i}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.05 * i }}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '0.6rem',
-                  padding: '0.55rem 0.75rem',
-                  background: r.ok ? 'var(--success-muted)' : 'var(--error-muted)',
-                  borderRadius: 'var(--r-sm)',
-                  border: `1px solid ${r.ok ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}`,
-                }}
-              >
-                {r.ok
-                  ? <CheckCircle2 size={14} color="var(--success)" />
-                  : <AlertTriangle size={14} color="var(--warning)" />
-                }
-                <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', flex: 1 }}>{r.label}</span>
-                {r.value && <span style={{ fontSize: '0.68rem', color: r.ok ? 'var(--text-tertiary)' : 'var(--warning)', fontFamily: 'var(--font-mono)' }}>{r.value}</span>}
-              </motion.div>
+          {!profile && <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>Reading the project…</div>}
+          {profile && envVars.length === 0 && (
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>
+              This {profile.type?.label.toLowerCase() ?? 'project'} does not use any environment variables.
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '0.5rem' }}>
+            {envVars.map(v => (
+              <div key={v.name} title={v.used_in ? `Used in ${v.used_in}` : v.declared_in ? `Declared in ${v.declared_in}` : ''} style={{
+                display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.55rem 0.75rem',
+                background: v.set ? 'var(--success-muted)' : 'var(--warning-muted)', borderRadius: 'var(--r-sm)',
+                border: `1px solid ${v.set ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.25)'}`,
+              }}>
+                {v.set ? <CheckCircle2 size={14} color="var(--success)" /> : <AlertTriangle size={14} color="var(--warning)" />}
+                <span style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', flex: 1, fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.name}</span>
+                <span style={{ fontSize: '0.66rem', color: 'var(--text-tertiary)' }}>{v.provider ?? v.kind.replace('_', ' ')}</span>
+              </div>
             ))}
           </div>
         </GlassCard>

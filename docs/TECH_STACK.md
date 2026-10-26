@@ -10,7 +10,11 @@ versions for reproducible installs.
 - Secondary screens are lazy-loaded; the chart library downloads only when a
   chart screen opens. Polling uses `src/lib/usePolling.ts`, which pauses
   while the window is hidden.
-- Tauri 2 desktop shell under `frontend/src-tauri/`.
+- Tauri 2 desktop shell under `frontend/src-tauri/` with `tray-icon`,
+  `tauri-plugin-autostart`, `tauri-plugin-single-instance`,
+  `tauri-plugin-notification`, `tauri-plugin-global-shortcut` (Alt+Space, Ctrl+Alt+A).
+  JS side: `@tauri-apps/api`, `@tauri-apps/plugin-autostart`,
+  `@tauri-apps/plugin-notification` (loaded lazily via `src/lib/desktop.ts`).
 - npm and `frontend/package-lock.json`.
 - HTTP/WebSocket access to FastAPI through `frontend/src/lib/api.ts`.
 
@@ -73,3 +77,14 @@ of source control.
 `API_KEY` is read by configuration code but is not evidence that the FastAPI
 routes enforce authentication. Treat the current service as a trusted local
 development process; see `docs/SECURITY.md`.
+
+## Smart-workspace additions
+
+- **SQLite** (stdlib, FTS5) for local memory, tasks and usage.
+- **comtypes** for Windows UI Automation (`automation/uia.py`).
+- **Windows.Media.Ocr** through `automation/windows_ocr.ps1` (no extra install).
+- **keyring** for Windows Credential Manager (Needs inbox).
+- **Ollama** (optional, user-installed) for offline chat/embeddings;
+  recommended `qwen2.5-coder:3b` + `nomic-embed-text` on a 4 GB GPU.
+- **fastembed** (optional extra `local-ai`) for offline embeddings without Ollama.
+- **Rust stable** to build the desktop shell.

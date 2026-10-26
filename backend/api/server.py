@@ -20,7 +20,10 @@ from typing import Any
 from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+from automation.no_console import install as _hide_child_consoles
 from logging_config import configure_logging
+
+_hide_child_consoles()  # also when the app is started as `uvicorn api.server:app`
 
 configure_logging()
 
@@ -199,14 +202,32 @@ def _grounded_query(question: str, project_id: str) -> tuple[str, list[dict], bo
     from memory.retrieval import retrieve_by_vector, retrieve_recent
 
     memories: list[dict] = []
-    # Try vector retrieval first (requires DB + embedding backend)
+    # 1) Local memory (offline, fast): BM25 + local vectors when available.
     try:
-        memories = retrieve_by_vector(
+        from ai.bedrock_client import invoke_local_embedding
+        from memory.local_store import get_store
+
+        local_vec = None
+        emb = invoke_local_embedding([question])
+        if emb:
+            local_vec = emb[0][0]
+        memories = get_store().search(question, project_id=project_id, limit=6, query_embedding=local_vec)
+    except Exception as exc:
+        logger.debug("local memory search failed — %s", exc)
+    # 2) Cloud vector retrieval (requires DB + embedding backend)
+    try:
+        cloud = retrieve_by_vector(
             question,
             ["commits", "todos", "file_edits", "architecture_notes"],
             project_id=project_id,
             top_k=5,
         )
+        seen = {" ".join(str(m.get("content") or "").split()).lower() for m in memories}
+        for m in cloud or []:
+            sig = " ".join(str(m.get("content") or "").split()).lower()
+            if sig and sig not in seen:  # the cloud copy often repeats a local row
+                seen.add(sig)
+                memories.append(m)
     except Exception:
         pass
 
@@ -224,11 +245,18 @@ def _grounded_query(question: str, project_id: str) -> tuple[str, list[dict], bo
         if isinstance(m.get("content"), str) and len(m["content"]) > 400:
             m["content"] = m["content"][:400] + "…"
 
+    stack = ""
+    try:
+        from intelligence.profile import prompt_context
+
+        stack = "\n\nProject facts (detected from its files):\n" + prompt_context(project_id, 700)
+    except Exception:
+        pass
     system_prompt = (
         "You are AUTOMATA's Reasoning Engine. Answer the developer's question "
         "using the provided memory context when relevant. If the context doesn't "
         "contain the answer, say 'I don't have enough memory to answer that.' "
-        "Be direct. No chatbot filler, no fabricated details."
+        "Be direct. No chatbot filler, no fabricated details." + stack
     )
 
     from ai.bedrock_client import _all_llm_backends_exhausted
@@ -327,9 +355,29 @@ async def _lifespan(_app: FastAPI):
     await asyncio.to_thread(_resolve_default_project_id)
     start_sampler()
     start_tracker()
+    background = os.environ.get("AUTOMATA_DISABLE_BACKGROUND", "") != "1"
+    if background:
+        from memory.sync import start_sync
+        from workspace.capture_manager import get_manager
+        from workspace.snapshot import start_snapshots
+
+        from tasks.engine import recover_interrupted
+
+        start_sync()
+        await asyncio.to_thread(get_manager().start_default)
+        start_snapshots()
+        recover_interrupted()
     try:
         yield
     finally:
+        if background:
+            from memory.sync import stop_sync
+            from workspace.capture_manager import get_manager
+            from workspace.snapshot import stop_snapshots
+
+            stop_snapshots(final=True)
+            get_manager().stop()
+            stop_sync()
         stop_tracker()
         stop_sampler()
 
@@ -343,6 +391,10 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+from api.workspace_routes import router as _workspace_router  # noqa: E402
+
+app.include_router(_workspace_router)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -350,6 +402,8 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "tauri://localhost",
+        "http://tauri.localhost",  # Tauri 2 on Windows serves the app from here
+        "https://tauri.localhost",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
     ],
@@ -653,6 +707,10 @@ def create_project(body: dict = Body(...)) -> dict:
 @app.get("/projects/{project_id}/brief", tags=["projects"])
 def get_morning_brief(project_id: str) -> dict:
     brief = _safe_fetch(get_daily_brief, project_id, default=None)
+    if not brief:
+        from memory.local_store import get_store
+
+        brief = get_store().get_value(f"brief:{project_id}")
     return {"brief": brief}
 
 
@@ -807,6 +865,20 @@ def generate_morning_brief(project_id: str) -> dict:
     commits = _safe_fetch(get_commits, project_id, limit=20, default=[]) or []
     file_edits = _safe_fetch(get_file_edits, project_id, limit=20, default=[]) or []
     todos = _safe_fetch(get_todos, project_id, default=[]) or []
+    if not commits and not file_edits:
+        # Cloud DB down or empty: build the brief from local memory instead.
+        from memory.local_store import get_store
+
+        store = get_store()
+        commits = [
+            {"message": m["content"].split(": ", 1)[-1], "committed_at": m["timestamp"]}
+            for m in store.recent(project_id, ["commit"], limit=20)
+        ]
+        file_edits = [
+            {"file_path": (m["meta"] or {}).get("file_path") or m["content"].removeprefix("Edited "),
+             "change_summary": m["content"], "edited_at": m["timestamp"]}
+            for m in store.recent(project_id, ["file_edit"], limit=20)
+        ]
 
     commits_count = len(commits)
 
@@ -889,6 +961,14 @@ def generate_morning_brief(project_id: str) -> dict:
         "brief_text": brief_text,
         "generated_at": datetime.now(UTC).isoformat(),
     }
+
+    from memory.local_store import get_store, remember
+
+    remember(project_id, "brief", brief_text, ref=f"brief:{brief_date}", meta=brief_data)
+    try:
+        get_store().set_value(f"brief:{project_id}", brief_data)
+    except Exception:
+        pass
 
     _safe_fetch(
         upsert_daily_brief,
@@ -1144,8 +1224,21 @@ def query_memory(body: dict = Body(...)) -> dict:
 # ─── Chat & Intent Routing ─────────────────────────────────────────────────────
 
 
+def _remember_chat(project_id: str, message: str, reply: str | None, intent: str) -> None:
+    """Keep chat turns in local memory so 'what did we discuss' works later."""
+    if not project_id or not message:
+        return
+    from memory.local_store import remember
+
+    text = f"Q: {message.strip()[:500]}\nA: {(reply or '').strip()[:1500]}"
+    remember(project_id, "chat", text, meta={"intent": intent})
+
+
 # Desktop-control intents work without a registered project.
 _PROJECT_FREE_INTENT_NAMES = {
+    "switch_tab",
+    "type_text",
+    "list_windows",
     "open_app",
     "open_browser",
     "system_command",
@@ -1166,6 +1259,9 @@ _PROJECT_FREE_INTENT_NAMES = {
 
 
 _PROJECT_FREE_ACTIONS = {
+    "switch_tab",
+    "type_text",
+    "list_windows",
     "chat_open_browser",
     "chat_open_app",
     "chat_system_command",
@@ -1208,6 +1304,22 @@ def chat(body: dict = Body(...)) -> dict:
             "executed_actions": [],
             "project_id": project_id,
             "backend": "ok" if _backend_available() else "unavailable",
+        }
+
+    # Quick everyday commands (music, search, screen) need no project or planner.
+    from assist.commands import run as run_quick_command
+
+    quick = run_quick_command(message, project_id or None)
+    if quick is not None:
+        return {
+            "intent": quick["intent"],
+            "confidence": 1.0,
+            "reply": quick["reply"],
+            "actions": [],
+            "executed_actions": [],
+            "project_id": project_id or None,
+            "backend": "ok",
+            **({} if quick["success"] else {"error": quick["reply"]}),
         }
 
     from decision_engine.intent_parser import IntentType, parse_intent
@@ -1257,6 +1369,10 @@ def chat(body: dict = Body(...)) -> dict:
         IntentType.REVIEW_VISIBLE_DESIGN: "chat:review_visible_design",
         IntentType.GENERATE_PROMPT_FROM_SCREEN: "chat:generate_prompt_from_screen",
         IntentType.VERIFY_VISIBLE_RESULT: "chat:verify_visible_result",
+        IntentType.DELEGATE_TASK: "chat:delegate_task",
+        IntentType.SWITCH_TAB: "chat:switch_tab",
+        IntentType.TYPE_TEXT: "chat:type_text",
+        IntentType.LIST_WINDOWS: "chat:list_windows",
     }
     trigger = trigger_by_intent.get(parsed_intent.intent)
     if trigger:
@@ -1272,6 +1388,7 @@ def chat(body: dict = Body(...)) -> dict:
         executed_actions = [
             action for action in planned.get("actions", []) if action.get("executed")
         ]
+        _remember_chat(project_id, message, planned.get("reply", ""), parsed_intent.intent.value)
         return {
             "intent": parsed_intent.intent.value,
             "confidence": parsed_intent.confidence,
@@ -1283,6 +1400,7 @@ def chat(body: dict = Body(...)) -> dict:
         }
 
     reply, actions, intent = _generate_chat_reply(message, project_id)
+    _remember_chat(project_id, message, reply, intent)
 
     return {
         "intent": intent,
@@ -1378,7 +1496,7 @@ def external_agent_status() -> dict:
 
     bridge = AgentBridge()
     return {
-        "tools": [vars(bridge.check_tool(tool)) for tool in ("claude", "cursor", "antigravity")]
+        "tools": [vars(bridge.check_tool(tool)) for tool in ("claude", "cursor", "antigravity", "vscode")]
     }
 
 
@@ -1388,7 +1506,7 @@ def send_external_agent_prompt(tool: str, body: dict = Body(...)) -> dict:
     from automation.agent_bridge import AgentBridge
     from memory.capture import redact_secrets
 
-    if tool not in {"claude", "cursor", "antigravity"}:
+    if tool not in {"claude", "cursor", "antigravity", "vscode"}:
         raise HTTPException(status_code=404, detail="Unknown external agent")
     if body.get("approved") is not True:
         raise HTTPException(
@@ -1707,95 +1825,23 @@ def get_live_project_metrics(project_id: str) -> dict:
     active_sessions = [s for s in sessions if not s.get("ended_at")]
     latency_ms = round((time.perf_counter() - started) * 1000, 2)
     todo_total = len(done_todos) + len(pending_todos)
-    activity_total = len(commits) + len(file_edits) + len(terminal_cmds) + len(decisions)
     db_status = db_health_check()
-    db_ok = db_status.get("db") == "connected"
-    repo_ok = bool(git_status.get("ok"))
-    embedding_ok = settings.embedding_available
     reasoning_ok = _backend_available()
-    has_frontend = os.path.exists(os.path.join(repo_path, "package.json")) or os.path.exists(
-        os.path.join(repo_path, "frontend", "package.json")
-    )
-    has_backend = os.path.exists(os.path.join(repo_path, "pyproject.toml")) or os.path.exists(
-        os.path.join(repo_path, "backend", "pyproject.toml")
-    )
 
-    def _clamp(value: float) -> int:
-        return int(max(0, min(100, round(value))))
+    # Modules come from the project's own structure (intelligence/profile.py),
+    # not a fixed list — a Next.js app and a Django app get different cards.
+    module_health: list[dict[str, Any]] = []
+    try:
+        from intelligence.profile import get_profile
 
-    module_health = [
-        {
-            "name": "Memory Engine",
-            "pct": _clamp(
-                (35 if db_ok else 0)
-                + min(35, activity_total * 2)
-                + (15 if active_sessions else 0)
-                + (15 if not failed_commands else 5)
-            ),
-            "basis": "DB connectivity, captured events, active sessions, failed command memory",
-        },
-        {
-            "name": "Vector Search",
-            "pct": _clamp(
-                (45 if embedding_ok else 0)
-                + (25 if db_ok else 0)
-                + min(20, len(commits) + len(pending_todos))
-                + (10 if not recent_test_failures else 0)
-            ),
-            "basis": "embedding configuration, DB availability, searchable memory volume, recent test state",
-        },
-        {
-            "name": "Reasoning Engine",
-            "pct": _clamp(
-                (70 if reasoning_ok else 0)
-                + (15 if db_ok else 0)
-                + (15 if not failed_commands else 5)
-            ),
-            "basis": "configured/reachable reasoning backend plus healthy memory context",
-        },
-        {
-            "name": "Automation Layer",
-            "pct": _clamp(
-                (35 if repo_ok else 0)
-                + min(25, len(terminal_cmds) * 3)
-                + (25 if not failed_commands else 5)
-                + (15 if has_backend else 5)
-            ),
-            "basis": "git access, backend project files, command capture, command failure rate",
-        },
-        {
-            "name": "UI / Dashboard",
-            "pct": _clamp(
-                (35 if has_frontend else 10)
-                + min(25, len(changed_files) * 4)
-                + (
-                    25
-                    if any(
-                        "npm run build" in str(c.get("command", "")).lower() for c in test_commands
-                    )
-                    else 0
-                )
-                + (15 if latency_ms < 250 else 5)
-            ),
-            "basis": "frontend project files, changed UI files, build evidence, API latency",
-        },
-        {
-            "name": "TODO Tracking",
-            "pct": _clamp(
-                (35 if todo_total else 0)
-                + (45 * (len(done_todos) / max(1, todo_total)))
-                + min(20, todo_total * 3)
-            ),
-            "basis": "pending/done TODO memory and completion ratio",
-        },
-        {
-            "name": "Decision Engine",
-            "pct": _clamp(
-                min(55, len(decisions) * 8) + (25 if repo_ok else 0) + (20 if commits else 0)
-            ),
-            "basis": "decision-log provenance, git trigger readiness, commit memory",
-        },
-    ]
+        profile = get_profile(project_id)
+        if profile.get("ok"):
+            module_health = [
+                {"name": m["name"], "path": m["path"], "pct": m["pct"], "basis": m["basis"]}
+                for m in profile["modules"]
+            ]
+    except Exception as exc:
+        logger.debug("profile modules unavailable — %s", exc)
 
     return {
         "project_id": project_id,

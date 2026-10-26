@@ -148,15 +148,9 @@ def app_category(app: str) -> str:
 
 
 def default_db_path() -> Path:
-    override = os.environ.get("AUTOMATA_DATA_DIR")
-    if override:
-        base = Path(override)
-    elif os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "AUTOMATA"
-    else:
-        base = Path.home() / ".automata"
-    base.mkdir(parents=True, exist_ok=True)
-    return base / "usage.db"
+    from config import data_dir
+
+    return Path(data_dir()) / "usage.db"
 
 
 # ─── Storage ──────────────────────────────────────────────────────────────────

@@ -12,7 +12,6 @@ Ref:     ROADMAP.md Phase 4, PROJECT.md §4 (Agent Actions).
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
@@ -846,11 +845,13 @@ def _dispatch_cross_app_action(action: str, params: dict[str, Any]) -> Any:
     if action == "copy_to_clipboard":
         return copy_to_clipboard_action(str(params.get("text", "")))
     if action == "paste_clipboard":
-        return paste_clipboard_action()
+        return paste_clipboard_action(str(params.get("target_app") or "") or None)
     if action == "focus_app":
         return focus_app_action(str(params.get("app_name", params.get("app", ""))))
     if action == "send_keystroke":
-        return send_keystroke_action(str(params.get("keystrokes", "")))
+        return send_keystroke_action(
+            str(params.get("keystrokes", "")), str(params.get("target_app") or "") or None
+        )
     if action == "submit_prompt_to_app":
         return submit_prompt_to_app_action(
             app_name=str(params.get("app_name", "")),
@@ -1149,90 +1150,64 @@ def record_agent_mistake(project_id: str, symptom: str, root_cause: str, fix: st
 
 
 def copy_to_clipboard_action(text: str) -> dict[str, Any]:
-    """Copy generated text to the clipboard."""
-    from automation.os_windows import copy_to_clipboard
+    """Copy generated text to the clipboard (verified by reading it back)."""
+    from automation.desktop import copy_text
 
-    ok = copy_to_clipboard(text)
-    return {"success": ok, "action": "copy_to_clipboard", "length": len(text)}
+    return {**copy_text(text), "action": "copy_to_clipboard"}
 
 
-def paste_clipboard_action() -> dict[str, Any]:
-    """Paste clipboard content into the active target app."""
-    from automation.os_windows import paste_clipboard
+def paste_clipboard_action(target_app: str | None = None) -> dict[str, Any]:
+    """Paste the clipboard into a verified target window."""
+    from automation.desktop import paste
 
-    ok = paste_clipboard()
-    return {"success": ok, "action": "paste_clipboard", "pasted": ok, "keystrokes": "ctrl+v"}
+    return {**paste(target_app), "action": "paste_clipboard"}
 
 
 def focus_app_action(app_name: str) -> dict[str, Any]:
-    """Bring a known application window to the foreground."""
-    from automation.os_windows import focus_app
+    """Bring an app window to the front (confirmed by Windows)."""
+    from automation.desktop import focus
 
-    ok = focus_app(app_name)
-    return {"success": ok, "action": "focus_app", "app": app_name}
+    return {**focus(app_name), "action": "focus_app"}
 
 
-def send_keystroke_action(keystrokes: str) -> dict[str, Any]:
-    """Send limited safe keystrokes to the active window."""
-    from automation.os_windows import send_keystrokes
+def send_keystroke_action(keystrokes: str, target_app: str | None = None) -> dict[str, Any]:
+    """Send an allowed chord to a verified window."""
+    from automation.desktop import press
 
-    ok = send_keystrokes(keystrokes)
-    return {"success": ok, "action": "send_keystroke", "keystrokes": keystrokes}
+    return {**press(keystrokes, target_app=target_app), "action": "send_keystroke"}
 
 
 def submit_prompt_to_app_action(app_name: str, prompt_text: str, url: str = "") -> dict[str, Any]:
-    """Submit a generated prompt to an external app (ChatGPT, Claude, Cursor, etc.).
+    """Hand a prompt to another app (Claude, ChatGPT, Cursor…) with verified steps."""
+    from automation.desktop import handoff_prompt
 
-    Steps:
-    1. Copy full prompt text to clipboard (file-based for large text).
-    2. Open the browser URL (or desktop app) and bring it to the foreground.
-    3. Wait for the app to load.
-    4. Paste clipboard content into the active window (Ctrl+V).
-    5. Wait briefly for paste to complete.
-    6. Submit (Ctrl+Enter).
-    """
-    import time
+    if not prompt_text.strip():
+        return {"success": False, "action": "submit_prompt_to_app", "error": "prompt is required"}
+    return {**handoff_prompt(prompt_text, app_name=app_name, url=url), "action": "submit_prompt_to_app"}
 
-    from automation.os_windows import (
-        copy_to_clipboard,
-        focus_app,
-        launch_app,
-        launch_browser,
-        send_keystrokes,
-    )
 
-    steps: list[dict[str, Any]] = []
+def _project_context_for_prompt(project_id: str | None) -> str:
+    """Short, factual description of the selected project for external prompts."""
+    try:
+        from intelligence.profile import prompt_context
 
-    copy_ok = copy_to_clipboard(prompt_text)
-    steps.append({"action": "copy_to_clipboard", "success": copy_ok})
-
-    if url:
-        open_ok = launch_browser(url)
-        steps.append({"action": "open_url", "success": open_ok, "url": url})
-    elif app_name:
-        open_ok = launch_app(app_name)
-        steps.append({"action": "open_app", "success": open_ok, "app": app_name})
-        if open_ok:
-            focus_ok = focus_app(app_name)
-            steps.append({"action": "focus_app", "success": focus_ok, "app": app_name})
-
-    time.sleep(2.0)
-
-    paste_ok = send_keystrokes("ctrl+v")
-    steps.append({"action": "paste_clipboard", "success": paste_ok, "keystrokes": "ctrl+v"})
-
-    time.sleep(0.5)
-
-    submit_ok = send_keystrokes("ctrl+enter")
-    steps.append({"action": "send_keystroke", "success": submit_ok, "keystrokes": "ctrl+enter"})
-
-    all_success = all(s.get("success") for s in steps)
-    return {
-        "success": all_success,
-        "action": "submit_prompt_to_app",
-        "prompt_length": len(prompt_text),
-        "steps": steps,
+        return prompt_context(project_id)
+    except Exception as exc:
+        logger.debug("profile prompt context unavailable — %s", exc)
+    project = _get_project(project_id) if project_id else None
+    if not project:
+        return "No project is selected; keep the prompt project-agnostic."
+    repo = Path(str(project.get("repo_path") or ""))
+    markers = {
+        "package.json": "Node/JavaScript", "pyproject.toml": "Python", "requirements.txt": "Python",
+        "Cargo.toml": "Rust", "go.mod": "Go", "pom.xml": "Java (Maven)", "build.gradle": "Java/Kotlin (Gradle)",
+        "composer.json": "PHP", "Gemfile": "Ruby", "docker-compose.yml": "Docker Compose",
     }
+    found = sorted({label for name, label in markers.items() if repo.is_dir() and any(
+        (repo / sub / name).exists() for sub in ("", "frontend", "backend", "app", "server", "client")
+    )})
+    stack = ", ".join(found) if found else "not detected"
+    return f"Project: {project.get('name', 'unnamed')} at {repo}. Detected stack: {stack}."
 
 
 def generate_prompt_for_app(
@@ -1268,164 +1243,78 @@ def generate_prompt_for_app(
         f"The developer wants to submit a prompt to {app_name}. "
         f"Generate a prompt they can give to {app_name} to accomplish this task:\n\n"
         f"Request: {request_description}\n\n"
-        f"Project: AUTOMATA — a hackathon developer-agent project with a "
-        f"React + TypeScript frontend and a FastAPI Python backend. The "
-        f"workspace is at D:\\AUTOMATA."
+        f"{_project_context_for_prompt(project_id)}"
     )
 
     return _invoke_reasoning(system_prompt, user_message, memories)
 
 
 def verify_result_action(check_type: str, target: str = "") -> dict[str, Any]:
-    """Verify whether an action worked: app opened, file changed, prompt copied, etc."""
-    result: dict[str, Any] = {
-        "success": True,
-        "action": "verify_result",
-        "check_type": check_type,
-        "target": target,
-    }
-    if check_type == "file_changed":
-        if target and os.path.exists(target):
-            result["verified"] = True
-            result["exists"] = True
-            result["size"] = os.path.getsize(target)
-        else:
-            result["verified"] = False
-            result["exists"] = False
-    elif check_type == "clipboard_has_content":
-        from automation.os_windows import read_clipboard
+    """Check an outcome; unknown check types fail instead of passing."""
+    from automation.desktop import verify
 
-        content = read_clipboard()
-        result["verified"] = bool(content)
-        result["content_preview"] = content[:200] if content else ""
-    else:
-        result["verified"] = True
-    return result
+    return {**verify(check_type, target), "action": "verify_result"}
 
 
 # ─── Visual Feedback Actions ─────────────────────────────────────────────
 
 
 def capture_screen_action(region: str | None = None) -> dict[str, Any]:
-    """Capture a screenshot of the screen or a region."""
-    from automation.os_windows import capture_screen
+    """Capture the screen or a region."""
+    from automation.desktop import capture
 
-    path = capture_screen(region)
-    return {"success": bool(path), "action": "capture_screen", "path": path}
+    return {**capture(region=region), "action": "capture_screen"}
 
 
 def ocr_image_action(image_path: str) -> dict[str, Any]:
     """Extract text from a screenshot/image."""
-    from automation.ocr import ocr_image
+    from automation.ocr import run_ocr
 
-    text = ocr_image(image_path)
-    return {"success": bool(text), "action": "ocr_image", "text": text}
+    result = run_ocr(image_path)
+    return {
+        "success": result["ok"],
+        "action": "ocr_image",
+        "text": result["text"],
+        "engine": result["engine"],
+        "error": result["error"],
+    }
 
 
 def read_visible_context_action() -> dict[str, Any]:
-    """Capture and OCR the current visible workspace."""
-    from automation.ocr import ocr_image
-    from automation.screen_capture import capture_screen
+    """Capture and OCR the current screen."""
+    from automation.desktop import read_screen
 
-    screen_path = capture_screen()
-    if not screen_path:
-        return {
-            "success": False,
-            "action": "read_visible_context",
-            "error": "screen capture failed",
-        }
-    text = ocr_image(screen_path)
-    return {
-        "success": bool(text),
-        "action": "read_visible_context",
-        "text": text,
-        "screen_path": screen_path,
-    }
+    return {**read_screen(), "action": "read_visible_context"}
 
 
 def diagnose_visible_error_action() -> dict[str, Any]:
-    """Parse visible error text and connect it to project memory."""
-    from automation.ocr import ocr_image
-    from automation.screen_capture import capture_screen
+    """Read visible error text from the screen."""
+    from automation.desktop import read_screen
 
-    screen_path = capture_screen()
-    if not screen_path:
-        return {
-            "success": False,
-            "action": "diagnose_visible_error",
-            "error": "screen capture failed",
-        }
-    text = ocr_image(screen_path)
-    return {
-        "success": bool(text),
-        "action": "diagnose_visible_error",
-        "text": text,
-        "screen_path": screen_path,
-        "diagnosed": True,
-    }
+    return {**read_screen(), "action": "diagnose_visible_error"}
 
 
 def review_visible_design_action() -> dict[str, Any]:
-    """Analyze current UI/design preview and generate improvement notes."""
-    from automation.ocr import ocr_image
-    from automation.screen_capture import capture_screen
+    """Read the visible UI text for a design review."""
+    from automation.desktop import read_screen
 
-    screen_path = capture_screen()
-    if not screen_path:
-        return {
-            "success": False,
-            "action": "review_visible_design",
-            "error": "screen capture failed",
-        }
-    text = ocr_image(screen_path)
-    return {
-        "success": bool(text),
-        "action": "review_visible_design",
-        "text": text,
-        "screen_path": screen_path,
-        "reviewed": True,
-    }
+    return {**read_screen(), "action": "review_visible_design"}
 
 
 def generate_prompt_from_screen_action() -> dict[str, Any]:
-    """Use visible context plus project memory to draft a prompt for another tool."""
-    from automation.ocr import ocr_image
-    from automation.screen_capture import capture_screen
+    """Read the visible screen text to ground a prompt."""
+    from automation.desktop import read_screen
 
-    screen_path = capture_screen()
-    if not screen_path:
-        return {
-            "success": False,
-            "action": "generate_prompt_from_screen",
-            "error": "screen capture failed",
-        }
-    text = ocr_image(screen_path)
-    return {
-        "success": bool(text),
-        "action": "generate_prompt_from_screen",
-        "text": text,
-        "screen_path": screen_path,
-        "prompt_generated": True,
-    }
+    return {**read_screen(), "action": "generate_prompt_from_screen"}
 
 
-def verify_visible_result_action() -> dict[str, Any]:
-    """Check whether expected UI text/state appears after an action."""
-    from automation.ocr import ocr_image
-    from automation.screen_capture import capture_screen
+def verify_visible_result_action(expected_text: str = "") -> dict[str, Any]:
+    """Check whether *expected_text* is visible on screen."""
+    from automation.desktop import read_screen
 
-    screen_path = capture_screen()
-    if not screen_path:
-        return {
-            "success": False,
-            "action": "verify_visible_result",
-            "error": "screen capture failed",
-        }
-    text = ocr_image(screen_path)
-    return {
-        "success": bool(text),
-        "action": "verify_visible_result",
-        "text": text,
-        "screen_path": screen_path,
-        "verified": True,
-    }
+    if not expected_text.strip():
+        return {"success": False, "action": "verify_visible_result", "verified": False,
+                "error": "expected_text is required"}
+    return {**read_screen(expected_text=expected_text), "action": "verify_visible_result"}
+
+

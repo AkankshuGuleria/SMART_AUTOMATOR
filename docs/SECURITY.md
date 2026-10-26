@@ -57,3 +57,22 @@ details for an exposed deployment.
 
 This document describes current handling expectations. It is not a security
 certification or production deployment approval.
+
+## Smart-workspace safeguards
+
+- **Secrets from the Needs inbox** are written only to Windows Credential
+  Manager (`keyring`, service `AUTOMATA:<project_id>`) and/or the project's
+  `.env` (with a warning when git does not ignore it). Values are never stored
+  in `memory.db`, `tasks.db`, CockroachDB, logs, or prompts.
+- **Project profiles** read env variable names and whether a value exists —
+  never the values.
+- **Synthetic input** is only delivered to a window Windows confirms is the
+  target; AUTOMATA's own window is never typed into; prompt hand-offs press
+  Enter only after the pasted text is read back (UIA or OCR). Tests run with
+  `AUTOMATA_DISABLE_DESKTOP_INPUT=1`.
+- **Agent tasks** pause for approval before sending a prompt to another app and
+  before running build/test commands. The prompt is visible in the task first.
+- **Local data** (memory, tasks, usage, screenshots under `%TEMP%\automata_screens`)
+  stays on the machine. Window titles and captured text are redacted.
+- **Autostart** uses the per-user Run key (desktop app) or a Startup-folder
+  launcher (backend only) — removable from Settings.

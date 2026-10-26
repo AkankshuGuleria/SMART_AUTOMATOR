@@ -825,28 +825,17 @@ def filter_tools_by_config() -> list[Tool]:
 
 
 def _tool_copy_to_clipboard(params: dict[str, Any]) -> dict[str, Any]:
-    """Copy generated text to the Windows clipboard."""
-    text = str(params.get("text", ""))
-    if not text:
-        return {"success": False, "error": "text is required"}
-    try:
-        from automation.os_windows import copy_to_clipboard
+    """Copy generated text to the clipboard (verified by reading it back)."""
+    from automation.desktop import copy_text
 
-        ok = copy_to_clipboard(text)
-        return {"success": ok, "copied": ok, "length": len(text)}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    return copy_text(str(params.get("text", "")))
 
 
 def _tool_paste_clipboard(params: dict[str, Any]) -> dict[str, Any]:
-    """Paste clipboard content into the active target app."""
-    try:
-        from automation.os_windows import paste_clipboard
+    """Paste the clipboard into a verified target window."""
+    from automation.desktop import paste
 
-        ok = paste_clipboard()
-        return {"success": ok, "pasted": ok, "keystrokes": "ctrl+v"}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    return paste(str(params.get("target_app") or "") or None)
 
 
 def _tool_open_url(params: dict[str, Any]) -> dict[str, Any]:
@@ -864,138 +853,49 @@ def _tool_open_url(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _tool_focus_app(params: dict[str, Any]) -> dict[str, Any]:
-    """Bring a known existing window to the foreground."""
-    app_name = str(params.get("app_name", "")).strip()
-    if not app_name:
-        return {"success": False, "error": "app_name is required"}
-    try:
-        from automation.os_windows import focus_app
+    """Bring an app window to the front (confirmed by Windows)."""
+    from automation.desktop import focus
 
-        ok = focus_app(app_name)
-        return {"success": ok, "focused": ok, "app": app_name}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    return focus(str(params.get("app_name", "")).strip())
 
 
 def _tool_send_keystroke(params: dict[str, Any]) -> dict[str, Any]:
-    """Send limited safe keystrokes such as Ctrl+V, Enter, Ctrl+L, Alt+Tab."""
-    keystrokes = str(params.get("keystrokes", "")).strip()
-    if not keystrokes:
-        return {"success": False, "error": "keystrokes is required"}
-    try:
-        from automation.os_windows import send_keystrokes
+    """Send an allowed chord to a verified window."""
+    from automation.desktop import press
 
-        ok = send_keystrokes(keystrokes)
-        return {"success": ok, "sent": ok, "keystrokes": keystrokes}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    return press(str(params.get("keystrokes", "")).strip(), str(params.get("target_app") or "") or None)
 
 
 def _tool_submit_prompt_to_app(params: dict[str, Any]) -> dict[str, Any]:
-    """Higher-level flow: generate prompt, open/focus app, copy, paste, optionally submit."""
-    import time
+    """Generate a prompt if needed, then hand it to the app with verified steps."""
+    from automation.desktop import handoff_prompt
 
     app_name = str(params.get("app_name", "")).strip()
     prompt_text = str(params.get("prompt", "")).strip()
     url = str(params.get("url", "")).strip()
 
-    # If no explicit prompt text, try to generate one from the request description
     if not prompt_text:
-        request_desc = (
-            params.get("request_description", "")
-            or params.get("message", "")
-            or params.get("raw", "")
-        )
+        request_desc = params.get("request_description") or params.get("message") or params.get("raw") or ""
         target_app = url or app_name
         if request_desc and target_app:
             try:
                 from agent_actions import generate_prompt_for_app
 
-                generated = generate_prompt_for_app(request_desc, target_app)
-                if generated:
-                    prompt_text = generated
+                prompt_text = generate_prompt_for_app(
+                    request_desc, target_app, params.get("project_id")
+                ) or ""
             except Exception as exc:
                 logger.warning("_tool_submit_prompt_to_app: prompt generation failed | %s", exc)
         if not prompt_text:
             return {"success": False, "error": "prompt is required"}
-
-    try:
-        from automation.os_windows import (
-            copy_to_clipboard,
-            focus_app,
-            launch_app,
-            launch_browser,
-            send_keystrokes,
-        )
-
-        steps: list[dict[str, Any]] = []
-
-        # Step 1: Copy prompt to clipboard (file-based for large text)
-        copy_ok = copy_to_clipboard(prompt_text)
-        steps.append({"action": "copy_to_clipboard", "success": copy_ok})
-
-        # Step 2: Open/focus the target app
-        if url:
-            open_ok = launch_browser(url)
-            steps.append({"action": "open_url", "success": open_ok, "url": url})
-        elif app_name:
-            open_ok = launch_app(app_name) if app_name else False
-            steps.append({"action": "open_app", "success": open_ok, "app": app_name})
-            if open_ok:
-                focus_ok = focus_app(app_name)
-                steps.append({"action": "focus_app", "success": focus_ok, "app": app_name})
-
-        # Step 3: Wait for app to load and focus
-        time.sleep(2.0)
-
-        # Step 4: Paste the prompt into the active window (Ctrl+V)
-        paste_ok = send_keystrokes("ctrl+v")
-        steps.append({"action": "paste_clipboard", "success": paste_ok, "keystrokes": "ctrl+v"})
-
-        # Step 5: Wait for paste to complete
-        time.sleep(0.5)
-
-        # Step 6: Submit with Ctrl+Enter (common for chat apps)
-        submit_ok = send_keystrokes("ctrl+enter")
-        steps.append({"action": "send_keystroke", "success": submit_ok, "keystrokes": "ctrl+enter"})
-
-        all_success = all(s.get("success") for s in steps)
-        return {
-            "success": all_success,
-            "prompt_length": len(prompt_text),
-            "steps": steps,
-        }
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    return handoff_prompt(prompt_text, app_name=app_name, url=url, submit=bool(params.get("submit", True)))
 
 
 def _tool_verify_result(params: dict[str, Any]) -> dict[str, Any]:
-    """Confirm app opened, file changed, command completed, server started, or prompt was copied."""
-    check_type = str(params.get("type", "")).strip()
-    target = str(params.get("target", "")).strip()
-    if not check_type:
-        return {"success": False, "error": "type is required"}
-    try:
-        result: dict[str, Any] = {"success": True, "check_type": check_type, "target": target}
-        if check_type == "file_changed":
-            if target and os.path.exists(target):
-                result["verified"] = True
-                result["exists"] = True
-                result["size"] = os.path.getsize(target)
-            else:
-                result["verified"] = False
-                result["exists"] = False
-        elif check_type == "clipboard_has_content":
-            from automation.os_windows import read_clipboard
+    """Check an outcome; unknown check types fail instead of passing."""
+    from automation.desktop import verify
 
-            content = read_clipboard()
-            result["verified"] = bool(content)
-            result["content_preview"] = content[:200] if content else ""
-        else:
-            result["verified"] = True
-        return result
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    return verify(str(params.get("type", "")), str(params.get("target", "")))
 
 
 # ─── Register cross-app control tools ────────────────────────
@@ -1113,109 +1013,62 @@ def _register_cross_app_tools() -> None:
 
 
 def _tool_capture_screen(params: dict[str, Any]) -> dict[str, Any]:
-    """Capture a screenshot of the screen or a region."""
-    region = str(params.get("region", "")).strip() or None
-    try:
-        from automation.os_windows import capture_screen
+    """Capture the screen, a region, or an app's window."""
+    from automation.desktop import capture
 
-        path = capture_screen(region)
-        return {"success": bool(path), "path": path}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    return capture(
+        region=str(params.get("region") or "").strip() or None,
+        app_name=str(params.get("app_name") or "").strip() or None,
+    )
 
 
 def _tool_ocr_image(params: dict[str, Any]) -> dict[str, Any]:
     """Extract text from a screenshot/image."""
+    from automation.ocr import run_ocr
+
     image_path = str(params.get("image_path", "")).strip()
     if not image_path:
         return {"success": False, "error": "image_path is required"}
-    try:
-        from automation.ocr import ocr_image
-
-        text = ocr_image(image_path)
-        return {"success": bool(text), "text": text}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    result = run_ocr(image_path)
+    return {"success": result["ok"], "text": result["text"], "engine": result["engine"], "error": result["error"]}
 
 
 def _tool_read_visible_context(params: dict[str, Any]) -> dict[str, Any]:
-    """Capture and OCR the current visible workspace."""
-    try:
-        from automation.ocr import ocr_image
-        from automation.screen_capture import capture_screen
+    """Capture and OCR the screen (or one app's window)."""
+    from automation.desktop import read_screen
 
-        screen_path = capture_screen()
-        if not screen_path:
-            return {"success": False, "error": "screen capture failed"}
-        text = ocr_image(screen_path)
-        return {"success": bool(text), "text": text, "screen_path": screen_path}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    return read_screen(app_name=str(params.get("app_name") or "") or None)
 
 
 def _tool_diagnose_visible_error(params: dict[str, Any]) -> dict[str, Any]:
-    """Parse visible error text from the screen."""
-    try:
-        from automation.ocr import ocr_image
-        from automation.screen_capture import capture_screen
+    """Read visible error text from the screen for diagnosis."""
+    from automation.desktop import read_screen
 
-        screen_path = capture_screen()
-        if not screen_path:
-            return {"success": False, "error": "screen capture failed"}
-        text = ocr_image(screen_path)
-        return {"success": bool(text), "text": text, "screen_path": screen_path, "diagnosed": True}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    return read_screen(app_name=str(params.get("app_name") or "") or None)
 
 
 def _tool_review_visible_design(params: dict[str, Any]) -> dict[str, Any]:
-    """Analyze current UI/design preview and generate improvement notes."""
-    try:
-        from automation.ocr import ocr_image
-        from automation.screen_capture import capture_screen
+    """Read the visible UI text for a design review."""
+    from automation.desktop import read_screen
 
-        screen_path = capture_screen()
-        if not screen_path:
-            return {"success": False, "error": "screen capture failed"}
-        text = ocr_image(screen_path)
-        return {"success": bool(text), "text": text, "screen_path": screen_path, "reviewed": True}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    return read_screen(app_name=str(params.get("app_name") or "") or None)
 
 
 def _tool_generate_prompt_from_screen(params: dict[str, Any]) -> dict[str, Any]:
-    """Use visible context plus project memory to draft a prompt."""
-    try:
-        from automation.ocr import ocr_image
-        from automation.screen_capture import capture_screen
+    """Read the visible screen text to ground a prompt."""
+    from automation.desktop import read_screen
 
-        screen_path = capture_screen()
-        if not screen_path:
-            return {"success": False, "error": "screen capture failed"}
-        text = ocr_image(screen_path)
-        return {
-            "success": bool(text),
-            "text": text,
-            "screen_path": screen_path,
-            "prompt_generated": True,
-        }
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    return read_screen(app_name=str(params.get("app_name") or "") or None)
 
 
 def _tool_verify_visible_result(params: dict[str, Any]) -> dict[str, Any]:
-    """Check whether expected UI text/state appears after an action."""
-    try:
-        from automation.ocr import ocr_image
-        from automation.screen_capture import capture_screen
+    """Check whether expected text is visible on screen."""
+    from automation.desktop import read_screen
 
-        screen_path = capture_screen()
-        if not screen_path:
-            return {"success": False, "error": "screen capture failed"}
-        text = ocr_image(screen_path)
-        return {"success": bool(text), "text": text, "screen_path": screen_path, "verified": True}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    expected = str(params.get("expected_text") or "").strip()
+    if not expected:
+        return {"success": False, "verified": False, "error": "expected_text is required"}
+    return read_screen(expected_text=expected)
 
 
 def _register_visual_feedback_tools() -> None:

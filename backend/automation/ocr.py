@@ -1,125 +1,100 @@
 """
 automation/ocr.py — AUTOMATA Visual Feedback Layer: OCR text extraction.
 
-Owns:    Extracting text from screenshots and images using OCR.
-         Redacts secret-shaped strings before storage or model handoff.
-Never:   Must not write to CockroachDB. Must not call Bedrock.
-         Must not be called from Memory Engine or Reasoning Engine code.
-Ref:     ARCHITECTURE.md §3.2c, FEATURES_PHASE.md §9 (Visual Feedback Layer).
+Owns:    Extracting text from screenshots and images, then redacting
+         secret-shaped strings before the text is stored or sent to a model.
+Never:   Writes to CockroachDB, calls Bedrock, or touches the user's clipboard.
+         Never returns an engine status message as if it were recognised text.
+
+Engines, in order:
+1. Windows built-in OCR (Windows.Media.Ocr) via automation/windows_ocr.ps1 —
+   ships with Windows 10/11; needs an OCR language pack (English is default).
+2. Tesseract via pytesseract, if both are installed.
 """
+
+from __future__ import annotations
 
 import logging
 import os
 import re
+import subprocess
+import sys
+from typing import TypedDict
 
 logger = logging.getLogger(__name__)
 
+_PS_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "windows_ocr.ps1")
+_TIMEOUT_S = 30
+
+
+class OcrResult(TypedDict):
+    ok: bool
+    text: str
+    engine: str | None
+    error: str | None
+
+
+def run_ocr(image_path: str) -> OcrResult:
+    """OCR *image_path*. ``ok`` is False (with ``error``) when no engine succeeded."""
+    if not image_path or not os.path.exists(image_path):
+        return {"ok": False, "text": "", "engine": None, "error": f"Image not found: {image_path}"}
+
+    errors: list[str] = []
+    for engine, fn in (("windows", _ocr_windows), ("tesseract", _ocr_tesseract)):
+        text, error = fn(image_path)
+        if error is None:
+            text = redact_secrets(text)
+            logger.info("ocr: %s extracted %d chars from %s", engine, len(text), image_path)
+            return {"ok": True, "text": text, "engine": engine, "error": None}
+        errors.append(f"{engine}: {error}")
+    message = "No OCR engine could read the image (" + "; ".join(errors) + ")"
+    logger.warning("ocr: %s", message)
+    return {"ok": False, "text": "", "engine": None, "error": message}
+
 
 def ocr_image(image_path: str) -> str:
-    """
-    Extract text from an image using OCR.
-
-    Tries pytesseract first (requires Tesseract + tesseract-ocr),
-    falls back to a PowerShell-based approach, and returns empty
-    string if neither is available.
-
-    The extracted text is passed through redact_secrets() before
-    being returned, to prevent secrets from being stored or
-    handed off to models.
-    """
-    if not image_path or not os.path.exists(image_path):
-        logger.warning("ocr.ocr_image: file not found | path=%s", image_path)
-        return ""
-
-    text = _ocr_with_tesseract(image_path)
-    if not text:
-        text = _ocr_with_powershell(image_path)
-
-    # Redact secrets before returning
-    text = redact_secrets(text)
-
-    logger.info("ocr.ocr_image: extracted %d chars from %s", len(text), image_path)
-    return text
+    """Backward-compatible helper: recognised text, or '' when OCR failed."""
+    return run_ocr(image_path)["text"]
 
 
-def _ocr_with_tesseract(image_path: str) -> str:
-    """Try OCR using pytesseract (requires Tesseract OCR installed)."""
+def _ocr_windows(image_path: str) -> tuple[str, str | None]:
+    if sys.platform != "win32":
+        return "", "Windows OCR is only available on Windows"
+    env = {**os.environ, "AUTOMATA_OCR_PATH": os.path.abspath(image_path)}
+    try:
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", _PS_SCRIPT],
+            capture_output=True,
+            timeout=_TIMEOUT_S,
+            env=env,
+            shell=False,
+        )
+    except subprocess.TimeoutExpired:
+        return "", f"timed out after {_TIMEOUT_S}s"
+    except Exception as exc:
+        return "", str(exc)
+    stdout = completed.stdout.decode("utf-8", errors="replace").strip()
+    stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+    if completed.returncode != 0:
+        return "", stderr.splitlines()[-1] if stderr else f"exit code {completed.returncode}"
+    return stdout, None
+
+
+def _ocr_tesseract(image_path: str) -> tuple[str, str | None]:
     try:
         import pytesseract
         from PIL import Image
-
-        img = Image.open(image_path)
-        text = pytesseract.image_to_string(img)
-        return text.strip()
     except ImportError:
-        logger.debug("ocr._ocr_with_tesseract: pytesseract or Pillow not available")
-    except Exception as exc:
-        logger.debug("ocr._ocr_with_tesseract: failed — %s", exc)
-    return ""
-
-
-def _ocr_with_powershell(image_path: str) -> str:
-    """
-    Fallback OCR using PowerShell and Windows OCR capabilities.
-
-    Uses the Windows.Media.Ocr API via PowerShell to extract text.
-    This requires Windows 10+ with the OCR language pack installed.
-    """
+        return "", "pytesseract/Pillow not installed"
     try:
-        script = (
-            f"Add-Type -AssemblyName System.Windows.Forms; "
-            f"Add-Type -AssemblyName System.Drawing; "
-            f'$img = [System.Drawing.Image]::FromFile("{image_path}"); '
-            f"$clipboard = [System.Windows.Forms.Clipboard]; "
-            f"$clipboard.SetImage($img); "
-            f"Start-Sleep -Milliseconds 500; "
-            f"Add-Type -AssemblyName Windows.Media.Ocr; "
-            f"$ocrEngine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage("
-            f'  [Windows.Globalization.Language]::new("en-US")); '
-            f'if ($null -eq $ocrEngine) {{ Write-Output "ocr_unavailable"; exit }} '
-            f"$bitmap = [Windows.Graphics.Imaging.SoftwareBitmap]::CreateCopyFromBuffer("
-            f"  [Windows.Graphics.Imaging.BitmapDecoder]::Create("
-            f'    [System.IO.File]::OpenRead("{image_path}"), '
-            f"    [Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8, "
-            f"    [Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied), "
-            f"  [Windows.Graphics.Imaging.BitmapBufferAccessMode]::Read); "
-            f"$result = $ocrEngine.RecognizeAsync($bitmap); "
-            f'$text = ""; '
-            f"foreach ($line in $result.Lines) {{ "
-            f'  foreach ($word in $line.Words) {{ $text += $word.Text + " " }}; '
-            f'  $text += "`n" '
-            f"}}; "
-            f"$text.Trim()"
-        )
-        import subprocess
-
-        completed = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", script],
-            shell=False,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if completed.returncode == 0 and completed.stdout.strip():
-            return completed.stdout.strip()
+        with Image.open(image_path) as img:
+            return pytesseract.image_to_string(img).strip(), None
     except Exception as exc:
-        logger.debug("ocr._ocr_with_powershell: failed — %s", exc)
-    return ""
+        return "", str(exc)
 
 
 def redact_secrets(text: str) -> str:
-    """
-    Redact secret-shaped strings from OCR text before storage or model handoff.
-
-    Patterns redacted:
-    - GitHub tokens: ghp_
-    - AWS keys: AKIA
-    - OpenAI keys: sk-
-    - Generic key=value patterns
-    - Generic token= patterns
-    - Generic password= patterns
-    - Bearer tokens
-    """
+    """Redact secret-shaped strings from OCR text before storage or model handoff."""
     if not text:
         return text
 

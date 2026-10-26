@@ -124,13 +124,11 @@ def test_safe_keystroke_accepted_by_tool() -> None:
     assert "unsafe" not in result.get("error", "").lower()
 
 
-@patch("automation.os_windows.send_keystrokes", return_value=True)
-def test_paste_clipboard_sends_paste_keystroke(mock_send) -> None:
+def test_paste_clipboard_is_blocked_without_desktop_input() -> None:
+    # The suite disables synthetic input; paste must report that, not pretend.
     result = execute_tool("paste_clipboard", {})
-    assert result["success"] is True
-    assert result["pasted"] is True
-    assert result["keystrokes"] == "ctrl+v"
-    mock_send.assert_called_once_with("ctrl+v")
+    assert result["success"] is False
+    assert "disabled" in result["error"].lower()
 
 
 @patch("automation.os_windows.read_clipboard", return_value="copied prompt")

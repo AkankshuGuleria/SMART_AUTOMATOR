@@ -36,18 +36,89 @@ LLM_MAX_RETRIES = 3
 _LLM_COOLDOWN_SECONDS = 30.0
 _last_llm_fail_time: float = 0.0
 
-# ─── Ollama Configuration ──────────────────────────────────────────────
-OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_MODEL = "qwen2.5:7b"
-OLLAMA_EMBEDDING_MODEL = "nomic-embed-text"
+# ─── Ollama configuration (read at call time from settings / Setup screen) ──
+
+
+def _ollama_url() -> str:
+    from config import settings
+
+    return getattr(settings, "ollama_base_url", "") or "http://localhost:11434"
+
+
+def _ollama_chat_model() -> str:
+    """Model chosen in the Setup screen wins over _ollama_chat_model() from .env."""
+    from config import settings
+
+    try:
+        from memory.local_store import get_store
+
+        chosen = get_store().get_value("ollama_chat_model")
+        if chosen:
+            return str(chosen)
+    except Exception:
+        pass
+    return getattr(settings, "ollama_model", "") or "qwen2.5-coder:3b"
+
+
+def _ollama_embed_model() -> str:
+    from config import settings
+
+    return getattr(settings, "ollama_embedding_model", "") or "nomic-embed-text"
+
+
+# Which provider/model produced the most recent answer (shown in the UI).
+LAST_ANSWER: dict = {"provider": None, "model": None, "at": None}
+
+_online_cache: dict = {"at": -1e9, "value": True}
+
+
+def is_online(force: bool = False) -> bool:
+    """Cheap internet check (TCP to public DNS), cached for 30 s."""
+    import os
+    import socket
+
+    forced = os.environ.get("AUTOMATA_FORCE_ONLINE", "").strip()
+    if forced in {"0", "1"}:
+        return forced == "1"
+    if not force and time.monotonic() - _online_cache["at"] < 30:
+        return bool(_online_cache["value"])
+    value = False
+    for host, port in (("1.1.1.1", 443), ("8.8.8.8", 53)):
+        try:
+            with socket.create_connection((host, port), timeout=1.5):
+                value = True
+                break
+        except OSError:
+            continue
+    _online_cache.update(at=time.monotonic(), value=value)
+    return value
+
+
+def _ollama_port_open(timeout: float = 0.15) -> bool:
+    """Fast TCP probe. On Windows a refused connection otherwise costs ~2 s
+    (4 s for 'localhost', which tries IPv6 first), so check the port before HTTP."""
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(_ollama_url())
+    host = parsed.hostname or "127.0.0.1"
+    if host == "localhost":
+        host = "127.0.0.1"
+    try:
+        with socket.create_connection((host, parsed.port or 11434), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 def _get_ollama_available() -> bool:
     """Check if Ollama is running and reachable."""
+    if not _ollama_port_open():
+        return False
     try:
         import urllib.request
 
-        req = urllib.request.Request(f"{OLLAMA_BASE_URL}/api/tags", method="GET")
+        req = urllib.request.Request(f"{_ollama_url()}/api/tags", method="GET")
         with urllib.request.urlopen(req, timeout=2) as resp:
             if resp.status == 200:
                 return True
@@ -65,7 +136,7 @@ def _invoke_ollama_chat(system_prompt: str, user_message: str) -> str | None:
     try:
         payload = json.dumps(
             {
-                "model": OLLAMA_MODEL,
+                "model": _ollama_chat_model(),
                 "system": system_prompt,
                 "prompt": user_message,
                 "stream": False,
@@ -77,7 +148,7 @@ def _invoke_ollama_chat(system_prompt: str, user_message: str) -> str | None:
         ).encode("utf-8")
 
         req = urllib.request.Request(
-            f"{OLLAMA_BASE_URL}/api/generate",
+            f"{_ollama_url()}/api/generate",
             data=payload,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -105,7 +176,7 @@ def _invoke_ollama_embedding(text: str) -> list[float] | None:
     try:
         payload = json.dumps(
             {
-                "model": OLLAMA_EMBEDDING_MODEL,
+                "model": _ollama_embed_model(),
                 "prompt": text,
                 "options": {
                     "num_ctx": 8192,
@@ -114,7 +185,7 @@ def _invoke_ollama_embedding(text: str) -> list[float] | None:
         ).encode("utf-8")
 
         req = urllib.request.Request(
-            f"{OLLAMA_BASE_URL}/api/embeddings",
+            f"{_ollama_url()}/api/embeddings",
             data=payload,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -716,6 +787,11 @@ def invoke_reasoning(
             result = fn(api_key, system_prompt, grounded_prompt)
         if result:
             logger.info("LLM: %s succeeded", name)
+            LAST_ANSWER.update(
+                provider=name,
+                model=_ollama_chat_model() if name == "ollama" else None,
+                at=time.time(),
+            )
             return result
         logger.warning("LLM: %s failed", name)
         return None
@@ -750,14 +826,17 @@ def invoke_reasoning(
         ("NVIDIA", getattr(settings, "nvidia_api_key", ""), _invoke_nvidia_chat),
         ("Minimax", getattr(settings, "minimax_api_key", ""), _invoke_minimax_chat),
     ]
+    online = is_online()
+    if not online:
+        logger.info("invoke_reasoning: offline — using the local model only")
     for provider_name, api_key, func in cloud_providers:
-        if api_key:
+        if api_key and online:
             result = _try_provider(provider_name, func, api_key)
             if result:
                 _last_llm_fail_time = 0.0
                 return result
 
-    if settings.bedrock_available:
+    if settings.bedrock_available and online:
         result = _try_provider("bedrock", _invoke_bedrock_chat)
         if result:
             _last_llm_fail_time = 0.0
@@ -848,7 +927,7 @@ def invoke_embedding(text: str) -> list[float] | None:
     # Local mode: only Ollama
     if mode == "local":
         if _get_ollama_available():
-            logger.info("Embedding: trying Ollama (%s)", OLLAMA_EMBEDDING_MODEL)
+            logger.info("Embedding: trying Ollama (%s)", _ollama_embed_model())
             result = _invoke_ollama_embedding(text)
             if result:
                 logger.info("Embedding: Ollama succeeded")
@@ -915,7 +994,7 @@ def invoke_embedding(text: str) -> list[float] | None:
     # Auto mode: Ollama first, then cloud embeddings
     # Primary: Ollama (free, local)
     if _get_ollama_available():
-        logger.info("Embedding: trying Ollama (%s)", OLLAMA_EMBEDDING_MODEL)
+        logger.info("Embedding: trying Ollama (%s)", _ollama_embed_model())
         result = _invoke_ollama_embedding(text)
         if result:
             logger.info("Embedding: Ollama succeeded")
@@ -1009,3 +1088,117 @@ def _build_grounded_prompt(
             "Answer using ONLY the memory entries above. Be direct. No filler."
         )
     return template.format(memory_context=memory_context, user_message=user_message)
+
+
+# ─── Local (on-device) models ───────────────────────────────────────────────
+
+_fastembed_model = None
+FASTEMBED_MODEL_NAME = "BAAI/bge-small-en-v1.5"
+
+
+def _fastembed_enabled() -> bool:
+    try:
+        from memory.local_store import get_store
+
+        return bool(get_store().get_value("fastembed_enabled", False))
+    except Exception:
+        return False
+
+
+def fastembed_status() -> dict:
+    try:
+        import fastembed  # noqa: F401
+
+        installed = True
+    except ImportError:
+        installed = False
+    return {
+        "installed": installed,
+        "enabled": installed and _fastembed_enabled(),
+        "model": FASTEMBED_MODEL_NAME,
+        "loaded": _fastembed_model is not None,
+    }
+
+
+def _fastembed_embed(texts: list[str]) -> list[list[float]] | None:
+    global _fastembed_model
+    if not _fastembed_enabled():
+        return None
+    try:
+        from fastembed import TextEmbedding
+
+        if _fastembed_model is None:
+            from config import data_dir
+            import os
+
+            _fastembed_model = TextEmbedding(
+                FASTEMBED_MODEL_NAME, cache_dir=os.path.join(data_dir(), "models")
+            )
+        return [list(map(float, v)) for v in _fastembed_model.embed(texts)]
+    except Exception as exc:
+        logger.warning("fastembed embedding failed — %s", exc)
+        return None
+
+
+def ollama_status() -> dict:
+    """Is Ollama installed / running, which models are pulled, which are selected."""
+    import json
+    import os
+    import shutil
+    import urllib.request
+
+    exe = shutil.which("ollama") or next(
+        (
+            p
+            for p in (
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Ollama", "ollama.exe"),
+                r"C:\Program Files\Ollama\ollama.exe",
+            )
+            if os.path.exists(p)
+        ),
+        None,
+    )
+    models: list[str] = []
+    running = False
+    try:
+        if not _ollama_port_open():
+            raise ConnectionError("Ollama port closed")
+        with urllib.request.urlopen(f"{_ollama_url()}/api/tags", timeout=2) as resp:
+            running = resp.status == 200
+            models = [m.get("name", "") for m in json.loads(resp.read()).get("models", [])]
+    except Exception:
+        pass
+
+    def has(model: str) -> bool:
+        return model in models or (":" not in model and f"{model}:latest" in models)
+
+    chat, embed = _ollama_chat_model(), _ollama_embed_model()
+    return {
+        "installed": bool(exe) or running,
+        "exe": exe,
+        "running": running,
+        "url": _ollama_url(),
+        "models": models,
+        "chat_model": chat,
+        "chat_model_ready": has(chat),
+        "embedding_model": embed,
+        "embedding_model_ready": has(embed),
+    }
+
+
+def invoke_local_embedding(texts: list[str]) -> tuple[list[list[float]], str] | None:
+    """Embed *texts* on this machine only (fastembed, then Ollama). None if neither works."""
+    if not texts:
+        return None
+    vectors = _fastembed_embed(texts)
+    if vectors:
+        return vectors, f"fastembed:{FASTEMBED_MODEL_NAME}"
+    if not _get_ollama_available():
+        return None
+    out: list[list[float]] = []
+    for text in texts:
+        vec = _invoke_ollama_embedding(text)
+        if not vec:
+            return None
+        out.append(vec)
+    return out, f"ollama:{_ollama_embed_model()}"

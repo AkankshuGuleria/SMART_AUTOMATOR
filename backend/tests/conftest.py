@@ -32,6 +32,15 @@ for _key in (
     os.environ[_key] = ""
 os.environ["OLLAMA_BASE_URL"] = "http://127.0.0.1:9"  # closed port: Ollama always "down"
 os.environ["AUTOMATA_DISABLE_USAGE_TRACKER"] = "1"
+os.environ["AUTOMATA_DISABLE_BACKGROUND"] = "1"
+# Keep local stores (memory.db, usage.db) out of the developer's real profile.
+import tempfile as _tempfile
+
+os.environ["AUTOMATA_DATA_DIR"] = _tempfile.mkdtemp(prefix="automata-test-data-")
+# No real connectivity probes; individual tests flip this to simulate offline.
+os.environ["AUTOMATA_FORCE_ONLINE"] = "1"
+# Never send real keystrokes or steal focus while tests run.
+os.environ["AUTOMATA_DISABLE_DESKTOP_INPUT"] = "1"
 
 
 def pytest_configure(config):

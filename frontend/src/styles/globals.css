@@ -793,3 +793,11 @@ kbd {
   background: var(--accent-muted);
   color: var(--accent-2);
 }
+
+/* ── AI work bar window: transparent so the panel's rounded corners show ── */
+html.workbar,
+html.workbar body,
+html.workbar #root {
+  background: transparent !important;
+  overflow: hidden;
+}

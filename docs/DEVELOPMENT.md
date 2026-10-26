@@ -112,3 +112,33 @@ usage database.
 - **Automation/OCR unavailable:** check Windows desktop permissions and
   optional application/OCR dependencies. These failures should be reported,
   not treated as successful actions.
+
+## Desktop app build
+
+Requires Rust stable (`rustup default stable`) plus the npm deps.
+
+```powershell
+cd frontend
+npx tauri build --no-bundle   # → src-tauri\target\release\app.exe
+```
+
+Rust crate versions in `src-tauri/Cargo.lock` must match the `@tauri-apps/*`
+npm packages (same major.minor) or the build stops; update with
+`cargo update -p tauri -p tauri-plugin-autostart -p tauri-plugin-notification`.
+The app finds `backend/` by walking up from the exe (or `AUTOMATA_BACKEND_DIR`).
+
+## Environment flags
+
+| Variable | Effect |
+| --- | --- |
+| `AUTOMATA_DATA_DIR` | Folder for memory.db, tasks.db, usage.db, logs (default `%LOCALAPPDATA%\AUTOMATA`) |
+| `AUTOMATA_DISABLE_BACKGROUND=1` | Skip capture, sync, snapshots and task recovery at startup |
+| `AUTOMATA_DISABLE_USAGE_TRACKER=1` | No app-usage recording |
+| `AUTOMATA_DISABLE_DESKTOP_INPUT=1` | Hard block on synthetic keys/focus (always on in tests) |
+| `AUTOMATA_FORCE_ONLINE=0\|1` | Override the connectivity check |
+| `AUTOMATA_BACKEND_DIR` | Where the desktop app looks for `backend/main.py` |
+| `AUTOMATA_TASK_WATCH_MAX/QUIET/POLL` | Task watch-step timing (seconds) |
+| `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_EMBEDDING_MODEL`, `OLLAMA_MODELS` | Local model server, defaults, model storage folder |
+
+Optional offline embeddings without Ollama: `uv sync --extra local-ai`, then
+enable them via `POST /ai/local/offline-embeddings`.

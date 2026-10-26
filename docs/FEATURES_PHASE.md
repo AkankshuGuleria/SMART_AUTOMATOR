@@ -44,3 +44,14 @@ reported as complete before it actually runs.
 The documented policies are design constraints, not a claim that every
 external application integration has been manually exercised. Verify each
 action against the cases in `docs/QA_CHECKLIST.md`.
+
+## 6. Smart-workspace actions
+
+| Action | Policy | Notes |
+| --- | --- | --- |
+| `list_windows` | auto_execute | Read-only |
+| `switch_tab` | confirm_once | Verified by the window title afterwards |
+| `type_text` | confirm_once | Read back through UIA/OCR |
+| `delegate_task` | auto_execute | Only creates the task; hand-off and build steps require approval |
+| Task step `handoff` | approval | Prompt visible before sending |
+| Task step `verify` | approval | Runs the project's build/test commands |

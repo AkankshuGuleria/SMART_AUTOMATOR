@@ -38,6 +38,8 @@ import {
   type LiveMetrics,
 } from '../lib/api'
 import { usePolling } from '../lib/usePolling'
+import WhereYouLeftOff from '../components/WhereYouLeftOff'
+import ProjectProfileCard from '../components/ProjectProfileCard'
 
 interface DashboardProps {
   health: HealthStatus | null
@@ -363,10 +365,15 @@ export default function Dashboard({ health, healthLoading, projectId: _projectId
   const activeDaysCount = analytics?.commits_over_time?.length || 0
   const commitsThisWeek = analytics?.commits_over_time?.reduce((sum, c) => sum + c.count, 0) || 0
 
-  // Real readiness score from the backend, not a hard-coded number.
-  const memHealth = Math.round(
-    liveMetrics?.performance.module_health.find(m => m.name === 'Memory Engine')?.pct ?? 0,
-  )
+  // Readiness = average of this project's own module scores (from its profile),
+  // so a static site and a full-stack app are judged on their own structure.
+  const projectModules = liveMetrics?.performance.module_health ?? []
+  const readiness = projectModules.length
+    ? Math.round(projectModules.reduce((sum, m) => sum + m.pct, 0) / projectModules.length)
+    : null
+  const readinessTitle = projectModules.length
+    ? projectModules.map(m => `${m.name}: ${m.pct}% (${m.basis})`).join('\n')
+    : 'No modules detected yet for this project'
 
   const suggestions = useMemo(() => {
     const items: { label: string; action: string; icon: any }[] = []
@@ -612,14 +619,14 @@ export default function Dashboard({ health, healthLoading, projectId: _projectId
         style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.85rem' }}
       >
         {[
-          { icon: Brain, label: 'Memory Health', value: `${memHealth}%`, color: 'var(--success)', ring: memHealth },
+          { icon: Brain, label: 'Readiness', value: readiness === null ? '—' : `${readiness}%`, color: 'var(--success)', ring: readiness ?? 0, title: readinessTitle },
           { icon: GitCommit, label: 'Commits Today', value: `${commitsToday}`, color: 'var(--info)', ring: commitsToday > 0 ? 60 : 0 },
           { icon: CheckSquare, label: 'Tasks Done', value: `${tasksDone}/${tasksTotal}`, color: 'var(--accent-2)', ring: tasksTotal > 0 ? (tasksDone / tasksTotal) * 100 : 0 },
           { icon: Clock, label: 'Session Time', value: sessionDuration, color: 'var(--warning)', ring: sessionStats.total_time_seconds > 0 ? Math.min(100, (sessionStats.total_time_seconds / 3600) * 20) : 0 },
         ].map((stat) => {
           const Icon = stat.icon
           return (
-            <motion.div key={stat.label} variants={cardVariant}>
+            <motion.div key={stat.label} variants={cardVariant} title={(stat as { title?: string }).title}>
               <GlassCard padding="1rem" hoverable>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div>
@@ -737,6 +744,12 @@ export default function Dashboard({ health, healthLoading, projectId: _projectId
           )}
         </GlassCard>
       </motion.div>
+
+      {/* ── Where you left off + what this project is ─────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '1rem' }}>
+        <WhereYouLeftOff projectId={projectId ?? undefined} onOpenTasks={() => onNavigate('tasks')} />
+        <ProjectProfileCard projectId={projectId ?? undefined} compact onOpenInbox={() => onNavigate('inbox')} />
+      </div>
 
       {/* ── Morning brief + today's usage ─────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(240px, 1fr)', gap: '1rem' }}>
@@ -1091,7 +1104,7 @@ export default function Dashboard({ health, healthLoading, projectId: _projectId
           {[
             { label: 'Backend API', ok: apiOk, icon: Zap },
             { label: 'CockroachDB', ok: dbOk, icon: Activity },
-            { label: 'Memory Engine', ok: dbOk, icon: Brain },
+            { label: 'Cloud memory', ok: dbOk, icon: Brain },
             { label: 'Reasoning', ok: liveMetrics?.agent.reasoning_backend === 'available', icon: Terminal },
             { label: 'Projects', ok: projects.length > 0, icon: FolderOpen },
             { label: 'Bedrock', ok: bedrockConfigured, icon: Sparkles },

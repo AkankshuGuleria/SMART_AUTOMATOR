@@ -61,3 +61,20 @@ For each failed item, record the steps, expected and actual result, relevant
 screen/API endpoint, and sanitized logs. Fix one reproducible issue at a
 time, add a regression test where practical, and rerun the affected checklist
 items.
+
+## Smart workspace
+
+- [ ] Desktop app: launch, close (hides to tray), relaunch (focuses existing), tray *Quit and stop agent*.
+- [ ] Start at sign-in on → sign out/in → app in tray, backend healthy, capture following the last project.
+- [ ] Pull the network: chat still answers (local model) and memory search works; Setup shows "Offline".
+- [ ] Snapshot → Resume opens editor with recent files, a terminal, and skips running servers.
+- [ ] Profile for three different repos shows different stacks, run commands and modules.
+- [ ] "switch to the <x> tab", "type 'hello' into notepad", "what windows are open" — check each reported target.
+- [ ] Delegation: "using antigravity add a contact form" → read prompt → approve → files change → approve build → Inbox items.
+- [ ] Inbox: save a test key to Credential Manager + .env; confirm it is not in memory.db/tasks.db.
+- [ ] Work bar: Alt+Space and Ctrl+Alt+A open it top-centre; Esc / click-away hide it.
+- [ ] "play <song> on spotify" starts it; pause / next / volume work; "what's playing" matches.
+- [ ] "Read my screen" explains the window behind the bar; nothing is captured unless pressed.
+- [ ] Delegation asks its questions; the chosen folder is created and appears in the prompt.
+- [ ] Antigravity hand-off: prompt lands in the Agent panel's chat box and is sent after approval.
+- [ ] No console window flashes during normal use (Setup screen, Tasks, work bar).

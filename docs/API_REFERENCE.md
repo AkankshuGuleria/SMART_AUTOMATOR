@@ -92,3 +92,50 @@ implementation as the source of truth.
 The service is configured for loopback use. Do not expose it to a public or
 untrusted network. Current API route definitions do not establish a
 multi-user authentication/authorization boundary.
+
+## Smart workspace (`backend/api/workspace_routes.py`)
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/system/self-check` | Every dependency with status + fix hint |
+| `GET` | `/ai/status` | Online/offline, configured cloud providers, Ollama status, offline embeddings, last answering provider |
+| `GET` | `/ai/local/recommendation` | Local model sized to this GPU/disk, catalog |
+| `POST` / `GET` | `/ai/local/pull` | `{model}` start an Ollama pull / poll progress |
+| `POST` | `/ai/local/select` | `{chat_model}` choose the local chat model |
+| `POST` | `/ai/local/install-ollama` | Open the official winget installer in a visible window |
+| `POST` | `/ai/local/offline-embeddings` | `{enabled}` toggle fastembed (needs `uv sync --extra local-ai`) |
+| `GET` | `/memory/search?q=&project_id=` | Local memory search (offline); "No memory found for that query" when empty |
+| `GET` | `/memory/stats` | Memory counts per kind, store path |
+| `POST` | `/projects/{id}/activate` | Capture follows this project |
+| `GET` | `/workspace/capture` | Capture status |
+| `POST` / `GET` | `/projects/{id}/snapshot` | Save / read the latest session snapshot |
+| `POST` | `/workspace/snapshot-active` | Snapshot the active project (tray menu) |
+| `POST` | `/projects/{id}/resume` | `{open_editor, open_terminal, start_servers}` reopen the workspace; per-step results |
+| `GET` | `/projects/{id}/profile?refresh=` | Detected stack, run book, env requirements, scored modules |
+| `GET` | `/desktop/windows` | Visible app windows (excluding AUTOMATA) |
+| `GET` | `/desktop/tabs` | Browser tabs per window (UI Automation) |
+| `POST` | `/desktop/tabs/switch` | `{title, app?}` switch tab, verified by window title |
+| `POST` | `/desktop/focus` | `{app, title_hint?}` verified focus |
+| `POST` | `/desktop/type` | `{text, app?}` type/paste with read-back |
+| `POST` | `/desktop/read` | `{app?, region?, expected_text?}` capture + OCR |
+| `POST` | `/tasks` | `{request, agent, project_id}` create a delegation task |
+| `GET` | `/tasks`, `/tasks/{id}` | List / detail (steps, outputs, needs) |
+| `POST` | `/tasks/{id}/answer` | `{answers: {folder, stack, features, style, extra, q1...}}` answer the clarify questions; `{}` = defaults; 422 for a relative path or missing drive |
+| `POST` | `/tasks/{id}/approve`, `/tasks/{id}/cancel` | Release the waiting step / cancel |
+| `POST` | `/assist` | `{text, project_id?}` work bar: quick command (media, Spotify, search, screen) or falls back to `/chat`; returns `{handled_by, intent, reply, success}` |
+| `GET` | `/assist/now-playing` | Current media session `{title, artist, app, status, playing}` |
+| `POST` | `/assist/media` | `{action: play_pause\|next\|previous\|volume_up\|volume_down\|mute}` system media keys |
+| `POST` | `/assist/screen` | `{question?, app?}` OCR the window behind AUTOMATA and answer (only when called) |
+| `GET` | `/needs?project_id=&refresh=` | Open Inbox items (reconciled with the project profile) |
+| `POST` | `/needs/{id}/resolve` | `{save_to: keyring\|env_file\|both\|done\|dismiss, value?}` |
+
+WebSocket `/ws` also emits `task_update` and `task_needs_input` events. Task
+status `waiting_input` means the task waits for answers to its questions.
+
+`/chat` runs quick commands first (intent `assist_<name>`, no project needed):
+`assist_pause`, `assist_resume`, `assist_next`, `assist_previous`,
+`assist_volume_up/down`, `assist_mute`, `assist_now_playing`,
+`assist_spotify_play`, `assist_search`, `assist_screen`.
+
+New chat intents: `delegate_task` ("using antigravity build …"), `switch_tab`,
+`type_text` ("type 'x' into notepad"), `list_windows`.

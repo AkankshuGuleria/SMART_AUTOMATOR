@@ -15,6 +15,7 @@ import {
   type AutostartStatus,
   type UsageTrackerStatus,
 } from '../lib/api'
+import { isTauri, appAutostartEnabled, setAppAutostart } from '../lib/desktop'
 
 interface SettingsProps {
   reasoningMode: string
@@ -54,14 +55,29 @@ function BackgroundAgentCard() {
   const [busy, setBusy] = useState<'autostart' | 'tracking' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const inApp = isTauri()
+
   useEffect(() => {
-    getAutostart().then(setAutostartState).catch(() => setAutostartState(null))
+    if (inApp) {
+      // Inside the desktop app: the app itself starts at sign-in (hidden in the
+      // tray) and keeps the backend running.
+      appAutostartEnabled().then(enabled => setAutostartState({
+        supported: enabled !== null, enabled: !!enabled, launcher: null, command: 'AUTOMATA desktop app (tray)',
+      }))
+    } else {
+      getAutostart().then(setAutostartState).catch(() => setAutostartState(null))
+    }
     getUsageSummary('today').then(s => setTracking(s.tracking ?? null)).catch(() => setTracking(null))
-  }, [])
+  }, [inApp])
 
   const toggleAutostart = async (enabled: boolean) => {
     setBusy('autostart'); setError(null)
     try {
+      if (inApp) {
+        const now = await setAppAutostart(enabled)
+        setAutostartState(prev => ({ ...(prev ?? { supported: true, launcher: null, command: '' }), enabled: now }))
+        return
+      }
       const next = await setAutostart(enabled)
       setAutostartState(next)
       if (next.error) setError(next.error)
@@ -84,7 +100,9 @@ function BackgroundAgentCard() {
       title: 'Start at sign-in',
       desc: autostart?.supported === false
         ? 'Only available on Windows.'
-        : 'Runs the agent hidden in the background when you sign in to Windows, so capture and usage tracking never stop.',
+        : inApp
+          ? 'Starts AUTOMATA hidden in the system tray when you sign in; it keeps the agent running so memory, capture and usage tracking never stop.'
+          : 'Runs the agent hidden in the background when you sign in to Windows, so capture and usage tracking never stop.',
       checked: !!autostart?.enabled,
       disabled: !autostart?.supported || busy === 'autostart',
       onChange: toggleAutostart,

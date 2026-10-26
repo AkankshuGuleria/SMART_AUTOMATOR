@@ -8,11 +8,10 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, MessageSquare, Activity, Brain,
   Folder, Settings, ChevronRight,
-  Cpu, Sun, Moon, RefreshCw, Zap,
+  Cpu, Sun, Moon, RefreshCw, Zap, ListChecks, Inbox, ShieldCheck,
 } from 'lucide-react'
 import AIStatusBadge from '../ui/AIStatusBadge'
-
-type Screen = 'dashboard' | 'chat' | 'activity' | 'resources' | 'projects' | 'memory' | 'restore' | 'settings'
+import type { Screen } from '../../lib/screens'
 
 interface SidebarProps {
   activeScreen: Screen
@@ -24,16 +23,23 @@ interface SidebarProps {
   onModeChange?: (mode: string) => void
   expanded?: boolean
   onExpandedChange?: (expanded: boolean) => void
+  /** Small count bubbles, e.g. { inbox: 3, tasks: 1 }. */
+  badges?: Partial<Record<Screen, number>>
+  /** Internet reachable (false = local model only). */
+  aiOnline?: boolean
 }
 
 const NAV_ITEMS: { id: Screen; icon: React.FC<{ size?: number; strokeWidth?: number }>; label: string; section?: string }[] = [
   { id: 'dashboard',  icon: LayoutDashboard, label: 'Dashboard' },
   { id: 'chat',       icon: MessageSquare,   label: 'AI Chat' },
+  { id: 'tasks',      icon: ListChecks,      label: 'Tasks' },
+  { id: 'inbox',      icon: Inbox,           label: 'Needs from you' },
   { id: 'memory',     icon: Brain,           label: 'Memory' },
   { id: 'activity',   icon: Activity,        label: 'Activity' },
   { id: 'resources',  icon: Cpu,             label: 'Resources' },
   { id: 'projects',   icon: Folder,          label: 'Projects' },
   { id: 'restore',    icon: RefreshCw,       label: 'Restore' },
+  { id: 'setup',      icon: ShieldCheck,     label: 'Setup & health' },
   { id: 'settings',   icon: Settings,        label: 'Settings' },
 ]
 
@@ -50,6 +56,8 @@ export default function FloatingSidebar({
   onModeChange,
   expanded,
   onExpandedChange,
+  badges = {},
+  aiOnline = true,
 }: SidebarProps) {
   const [localExpanded, setLocalExpanded] = useState(false)
   const isExpanded = expanded !== undefined ? expanded : localExpanded
@@ -140,7 +148,7 @@ export default function FloatingSidebar({
       }}>
         <AIStatusBadge
           state={backendOnline ? 'idle' : 'offline'}
-          label={isExpanded ? (backendOnline ? 'Online' : 'Offline') : undefined}
+          label={isExpanded ? (!backendOnline ? 'Agent offline' : aiOnline ? 'Online' : 'Offline · local AI') : undefined}
           size="sm"
         />
       </div>
@@ -172,10 +180,19 @@ export default function FloatingSidebar({
                 overflow: 'hidden',
               }}
             >
-              <Icon
-                size={18}
-                strokeWidth={isActive ? 2.2 : 1.8}
-              />
+              <span style={{ position: 'relative', display: 'flex' }}>
+                <Icon
+                  size={18}
+                  strokeWidth={isActive ? 2.2 : 1.8}
+                />
+                {(badges[item.id] ?? 0) > 0 && (
+                  <span aria-label={`${badges[item.id]} pending`} style={{
+                    position: 'absolute', top: -5, right: -7, minWidth: 14, height: 14, padding: '0 3px',
+                    borderRadius: 7, background: 'var(--warning)', color: '#111', fontSize: '0.56rem',
+                    fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>{badges[item.id]}</span>
+                )}
+              </span>
               <AnimatePresence>
                 {isExpanded && (
                   <motion.span

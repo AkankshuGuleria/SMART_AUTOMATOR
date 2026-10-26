@@ -27,9 +27,15 @@ def test_register_project_requires_path():
     assert res.status_code == 422
 
 
-def test_register_project_reports_db_failure_instead_of_fake_success(tmp_path):
+def test_register_project_works_offline_via_local_store(tmp_path):
+    # Cloud DB is disconnected in tests: the project is created locally instead.
     res = client.post("/projects", json={"repo_path": str(tmp_path)})
-    assert res.status_code == 503
+    assert res.status_code == 200
+    project = res.json()["project"]
+    assert project["repo_path"] == str(tmp_path)
+    assert project["source"] == "local"
+    listed = client.get("/projects").json()["projects"]
+    assert any(p["id"] == project["id"] for p in listed)
 
 
 def test_register_project_returns_existing_for_duplicate_path(tmp_path):
@@ -107,3 +113,10 @@ def test_health_route_runs_in_threadpool_not_event_loop():
     for route in app.routes:
         if getattr(route, "path", "") in {"/chat", "/query", "/projects/{project_id}/metrics/live"}:
             assert not inspect.iscoroutinefunction(route.endpoint), route.path
+
+
+def test_cors_allows_tauri_desktop_origin():
+    res = client.options("/health", headers={
+        "Origin": "http://tauri.localhost", "Access-Control-Request-Method": "GET",
+    })
+    assert res.headers.get("access-control-allow-origin") == "http://tauri.localhost"

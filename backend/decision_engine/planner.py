@@ -60,6 +60,11 @@ ACTION_POLICY: dict[str, str] = {
     "review_visible_design": "confirm_once",
     "generate_prompt_from_screen": "auto_execute",
     "verify_visible_result": "auto_execute",
+    # Workspace actions
+    "list_windows": "auto_execute",
+    "switch_tab": "confirm_once",
+    "type_text": "confirm_once",
+    "delegate_task": "auto_execute",  # creating the task is safe; risky steps are gated inside it
 }
 
 
@@ -173,6 +178,11 @@ def _execute_action(action: dict[str, Any]) -> dict | None:
         "review_visible_design": _execute_review_visible_design,
         "generate_prompt_from_screen": _execute_generate_prompt_from_screen,
         "verify_visible_result": _execute_verify_visible_result,
+        # Workspace actions
+        "list_windows": _execute_list_windows,
+        "switch_tab": _execute_switch_tab,
+        "type_text": _execute_type_text,
+        "delegate_task": _execute_delegate_task,
     }
 
     fn = dispatch.get(action_type)
@@ -760,28 +770,15 @@ def _execute_restore_workspace(params: dict[str, Any]) -> dict | None:
 
 
 def _execute_copy_to_clipboard(params: dict[str, Any]) -> dict | None:
-    text = params.get("text", "")
-    if not text:
-        return {"success": False, "error": "text is required"}
-    try:
-        from automation.os_windows import copy_to_clipboard
+    from automation.desktop import copy_text
 
-        ok = copy_to_clipboard(text)
-        return {"success": ok, "copied": ok}
-    except Exception as exc:
-        logger.warning("plan: copy_to_clipboard failed | %s", exc)
-        return {"success": False, "error": str(exc)}
+    return copy_text(str(params.get("text", "")))
 
 
 def _execute_paste_clipboard(params: dict[str, Any]) -> dict | None:
-    try:
-        from automation.os_windows import paste_clipboard
+    from automation.desktop import paste
 
-        ok = paste_clipboard()
-        return {"success": ok, "pasted": ok, "keystrokes": "ctrl+v"}
-    except Exception as exc:
-        logger.warning("plan: paste_clipboard failed | %s", exc)
-        return {"success": False, "error": str(exc)}
+    return paste(str(params.get("target_app") or "") or None)
 
 
 def _execute_open_url(params: dict[str, Any]) -> dict | None:
@@ -799,212 +796,129 @@ def _execute_open_url(params: dict[str, Any]) -> dict | None:
 
 
 def _execute_focus_app(params: dict[str, Any]) -> dict | None:
-    app_name = params.get("app_name", "")
-    if not app_name:
-        return {"success": False, "error": "app_name is required"}
-    try:
-        from automation.os_windows import focus_app
+    from automation.desktop import focus
 
-        ok = focus_app(app_name)
-        return {"success": ok, "focused": ok, "app": app_name}
-    except Exception as exc:
-        logger.warning("plan: focus_app failed | %s", exc)
-        return {"success": False, "error": str(exc)}
+    return focus(str(params.get("app_name", "")))
 
 
 def _execute_send_keystroke(params: dict[str, Any]) -> dict | None:
-    keystrokes = params.get("keystrokes", "")
-    if not keystrokes:
-        return {"success": False, "error": "keystrokes is required"}
-    try:
-        from automation.os_windows import send_keystrokes
+    from automation.desktop import press
 
-        ok = send_keystrokes(keystrokes)
-        return {"success": ok, "sent": ok, "keystrokes": keystrokes}
-    except Exception as exc:
-        logger.warning("plan: send_keystroke failed | %s", exc)
-        return {"success": False, "error": str(exc)}
+    return press(str(params.get("keystrokes", "")), str(params.get("target_app") or "") or None)
 
 
 def _execute_submit_prompt_to_app(params: dict[str, Any]) -> dict | None:
-    app_name = params.get("app_name", "")
-    url = params.get("url", "")
-    prompt_text = params.get("prompt", "")
-    if not prompt_text:
+    from automation.desktop import handoff_prompt
+
+    prompt_text = str(params.get("prompt", ""))
+    if not prompt_text.strip():
         return {"success": False, "error": "prompt is required"}
-    try:
-        import time
-
-        from automation.os_windows import (
-            copy_to_clipboard,
-            focus_app,
-            launch_app,
-            launch_browser,
-            send_keystrokes,
-        )
-
-        steps: list[dict[str, Any]] = []
-        copy_ok = copy_to_clipboard(prompt_text)
-        steps.append({"action": "copy_to_clipboard", "success": copy_ok})
-        if url:
-            open_ok = launch_browser(url)
-            steps.append({"action": "open_url", "success": open_ok, "url": url})
-        elif app_name:
-            open_ok = launch_app(app_name)
-            steps.append({"action": "open_app", "success": open_ok, "app": app_name})
-            if open_ok:
-                focus_ok = focus_app(app_name)
-                steps.append({"action": "focus_app", "success": focus_ok, "app": app_name})
-        time.sleep(2.0)
-        paste_ok = send_keystrokes("ctrl+v")
-        steps.append({"action": "paste_clipboard", "success": paste_ok, "keystrokes": "ctrl+v"})
-        time.sleep(0.5)
-        submit_ok = send_keystrokes("ctrl+enter")
-        steps.append({"action": "send_keystroke", "success": submit_ok, "keystrokes": "ctrl+enter"})
-        all_success = all(s.get("success") for s in steps)
-        return {"success": all_success, "prompt_length": len(prompt_text), "steps": steps}
-    except Exception as exc:
-        logger.warning("plan: submit_prompt_to_app failed | %s", exc)
-        return {"success": False, "error": str(exc)}
+    return handoff_prompt(
+        prompt_text,
+        app_name=str(params.get("app_name", "")),
+        url=str(params.get("url", "")),
+        submit=bool(params.get("submit", True)),
+    )
 
 
 def _execute_verify_result(params: dict[str, Any]) -> dict | None:
-    check_type = params.get("type", "")
-    target = params.get("target", "")
-    if not check_type:
-        return {"success": False, "error": "type is required"}
-    try:
-        result: dict[str, Any] = {"success": True, "check_type": check_type, "target": target}
-        if check_type == "file_changed":
-            if target and os.path.exists(target):
-                result["verified"] = True
-                result["exists"] = True
-                result["size"] = os.path.getsize(target)
-            else:
-                result["verified"] = False
-                result["exists"] = False
-        elif check_type == "clipboard_has_content":
-            from automation.os_windows import read_clipboard
+    from automation.desktop import verify
 
-            content = read_clipboard()
-            result["verified"] = bool(content)
-            result["content_preview"] = content[:200] if content else ""
-        else:
-            result["verified"] = True
-            result["note"] = "check type not fully implemented for this type"
-        return result
-    except Exception as exc:
-        logger.warning("plan: verify_result failed | %s", exc)
-        return {"success": False, "error": str(exc)}
+    return verify(str(params.get("type", "")), str(params.get("target", "")))
 
 
 # ─── Visual feedback action executors ────────────────
 
 
 def _execute_capture_screen(params: dict[str, Any]) -> dict | None:
-    region = params.get("region")
-    try:
-        from automation.os_windows import capture_screen
+    from automation.desktop import capture
 
-        path = capture_screen(region)
-        return {"success": bool(path), "path": path}
-    except Exception as exc:
-        logger.warning("plan: capture_screen failed | %s", exc)
-        return {"success": False, "error": str(exc)}
+    return capture(
+        region=str(params.get("region") or "") or None,
+        app_name=str(params.get("app_name") or "") or None,
+    )
 
 
 def _execute_ocr_image(params: dict[str, Any]) -> dict | None:
-    image_path = params.get("image_path", "")
+    from automation.ocr import run_ocr
+
+    image_path = str(params.get("image_path", ""))
     if not image_path:
         return {"success": False, "error": "image_path is required"}
-    try:
-        from automation.ocr import ocr_image
-
-        text = ocr_image(image_path)
-        return {"success": bool(text), "text": text}
-    except Exception as exc:
-        logger.warning("plan: ocr_image failed | %s", exc)
-        return {"success": False, "error": str(exc)}
+    result = run_ocr(image_path)
+    return {"success": result["ok"], "text": result["text"], "engine": result["engine"], "error": result["error"]}
 
 
 def _execute_read_visible_context(params: dict[str, Any]) -> dict | None:
-    try:
-        from automation.ocr import ocr_image
-        from automation.screen_capture import capture_screen
+    from automation.desktop import read_screen
 
-        screen_path = capture_screen()
-        if not screen_path:
-            return {"success": False, "error": "screen capture failed"}
-        text = ocr_image(screen_path)
-        return {"success": bool(text), "text": text, "screen_path": screen_path}
-    except Exception as exc:
-        logger.warning("plan: read_visible_context failed | %s", exc)
-        return {"success": False, "error": str(exc)}
+    return read_screen(app_name=str(params.get("app_name") or "") or None)
 
 
 def _execute_diagnose_visible_error(params: dict[str, Any]) -> dict | None:
-    try:
-        from automation.ocr import ocr_image
-        from automation.screen_capture import capture_screen
+    from automation.desktop import read_screen
 
-        screen_path = capture_screen()
-        if not screen_path:
-            return {"success": False, "error": "screen capture failed"}
-        text = ocr_image(screen_path)
-        return {"success": bool(text), "text": text, "screen_path": screen_path, "diagnosed": True}
-    except Exception as exc:
-        logger.warning("plan: diagnose_visible_error failed | %s", exc)
-        return {"success": False, "error": str(exc)}
+    return read_screen(app_name=str(params.get("app_name") or "") or None)
 
 
 def _execute_review_visible_design(params: dict[str, Any]) -> dict | None:
-    try:
-        from automation.ocr import ocr_image
-        from automation.screen_capture import capture_screen
+    from automation.desktop import read_screen
 
-        screen_path = capture_screen()
-        if not screen_path:
-            return {"success": False, "error": "screen capture failed"}
-        text = ocr_image(screen_path)
-        return {"success": bool(text), "text": text, "screen_path": screen_path, "reviewed": True}
-    except Exception as exc:
-        logger.warning("plan: review_visible_design failed | %s", exc)
-        return {"success": False, "error": str(exc)}
+    return read_screen(app_name=str(params.get("app_name") or "") or None)
 
 
 def _execute_generate_prompt_from_screen(params: dict[str, Any]) -> dict | None:
-    try:
-        from automation.ocr import ocr_image
-        from automation.screen_capture import capture_screen
+    from automation.desktop import read_screen
 
-        screen_path = capture_screen()
-        if not screen_path:
-            return {"success": False, "error": "screen capture failed"}
-        text = ocr_image(screen_path)
-        return {
-            "success": bool(text),
-            "text": text,
-            "screen_path": screen_path,
-            "prompt_generated": True,
-        }
-    except Exception as exc:
-        logger.warning("plan: generate_prompt_from_screen failed | %s", exc)
-        return {"success": False, "error": str(exc)}
+    return read_screen(app_name=str(params.get("app_name") or "") or None)
 
 
 def _execute_verify_visible_result(params: dict[str, Any]) -> dict | None:
-    try:
-        from automation.ocr import ocr_image
-        from automation.screen_capture import capture_screen
+    from automation.desktop import read_screen
 
-        screen_path = capture_screen()
-        if not screen_path:
-            return {"success": False, "error": "screen capture failed"}
-        text = ocr_image(screen_path)
-        return {"success": bool(text), "text": text, "screen_path": screen_path, "verified": True}
-    except Exception as exc:
-        logger.warning("plan: verify_visible_result failed | %s", exc)
-        return {"success": False, "error": str(exc)}
+    expected = str(params.get("expected_text") or "").strip()
+    if not expected:
+        return {
+            "success": False,
+            "verified": False,
+            "error": "Say what text to look for, e.g. check if \'Build succeeded\' is visible.",
+        }
+    return read_screen(expected_text=expected)
+
+
+def _execute_list_windows(params: dict[str, Any]) -> dict | None:
+    from automation.desktop import browser_tabs, list_windows
+
+    windows = list_windows()
+    tabs = browser_tabs()
+    return {
+        "success": windows.get("success", False),
+        "windows": windows.get("windows", []),
+        "browser_tabs": tabs.get("windows", []) if tabs.get("success") else [],
+        "error": windows.get("error"),
+    }
+
+
+def _execute_switch_tab(params: dict[str, Any]) -> dict | None:
+    from automation.desktop import switch_tab
+
+    return switch_tab(str(params.get("title", "")), str(params.get("app_name") or "browser"))
+
+
+def _execute_type_text(params: dict[str, Any]) -> dict | None:
+    from automation.desktop import type_text
+
+    return type_text(str(params.get("text", "")), str(params.get("target_app") or "") or None)
+
+
+def _execute_delegate_task(params: dict[str, Any]) -> dict | None:
+    from tasks.engine import create_delegation_task
+
+    return create_delegation_task(
+        project_id=params.get("project_id"),
+        request=str(params.get("request", "")),
+        agent=str(params.get("agent", "")),
+    )
 
 
 # ─── Trigger → action mapping ─────────────────────────────────────────────────
@@ -1017,6 +931,25 @@ _COMPOUND_SECONDARY_PATTERNS = re.compile(
     r"(?:generate|create|write|draft|make|build|prepare|give me)\b",
     re.IGNORECASE,
 )
+
+
+_INTO_APP_RE = re.compile(r"\b(?:into|in|to)\s+(?:the\s+)?([a-z][\w .+-]{1,30}?)\s*(?:window|app)?\s*$", re.I)
+_QUOTED_RE = re.compile(r"[\"'“‘]([^\"'”’]{2,120})[\"'”’]")
+
+
+def _target_app_in(message: str) -> str:
+    """'paste it into notepad' → 'notepad' ('' when no app is named)."""
+    match = _INTO_APP_RE.search(message or "")
+    if not match:
+        return ""
+    name = match.group(1).strip().lower()
+    return "" if name in {"it", "there", "here", "this"} else name
+
+
+def _quoted_text_in(message: str) -> str:
+    """check if 'Build succeeded' is visible → 'Build succeeded'."""
+    match = _QUOTED_RE.search(message or "")
+    return match.group(1).strip() if match else ""
 
 
 def _detect_secondary_query(message: str) -> bool:
@@ -1241,7 +1174,7 @@ def _get_actions_for_trigger(trigger: str, context: dict[str, Any]) -> list[dict
             {
                 "type": "paste_clipboard",
                 "policy": ACTION_POLICY["paste_clipboard"],
-                "params": {"project_id": project_id},
+                "params": {"project_id": project_id, "target_app": _target_app_in(message)},
                 "provenance": "Suggested: paste clipboard content into the active app",
             }
         ]
@@ -1393,6 +1326,38 @@ def _get_actions_for_trigger(trigger: str, context: dict[str, Any]) -> list[dict
             }
         ]
 
+    if trigger == "chat:list_windows":
+        return [{
+            "type": "list_windows",
+            "policy": ACTION_POLICY["list_windows"],
+            "params": {"project_id": project_id},
+            "provenance": "Executed: listed open windows and browser tabs",
+        }]
+
+    if trigger == "chat:switch_tab":
+        return [{
+            "type": "switch_tab",
+            "policy": ACTION_POLICY["switch_tab"],
+            "params": {"project_id": project_id, "title": target},
+            "provenance": f"Suggested: switch to the '{target}' tab",
+        }]
+
+    if trigger == "chat:type_text":
+        return [{
+            "type": "type_text",
+            "policy": ACTION_POLICY["type_text"],
+            "params": {"project_id": project_id, "text": parsed.get("prompt", ""), "target_app": parsed.get("app_name", "")},
+            "provenance": f"Suggested: type into {parsed.get('app_name') or 'the active window'}",
+        }]
+
+    if trigger == "chat:delegate_task":
+        return [{
+            "type": "delegate_task",
+            "policy": ACTION_POLICY["delegate_task"],
+            "params": {"project_id": project_id, "request": message, "agent": parsed.get("app_name", "")},
+            "provenance": f"Executed: created a task for {parsed.get('app_name') or 'an AI app'}",
+        }]
+
     if trigger == "chat:generate_prompt_from_screen":
         return [
             {
@@ -1408,7 +1373,7 @@ def _get_actions_for_trigger(trigger: str, context: dict[str, Any]) -> list[dict
             {
                 "type": "verify_visible_result",
                 "policy": ACTION_POLICY["verify_visible_result"],
-                "params": {"project_id": project_id},
+                "params": {"project_id": project_id, "expected_text": _quoted_text_in(message)},
                 "provenance": "Executed: verified visible result on screen",
             }
         ]
@@ -1468,6 +1433,31 @@ def _build_reply(trigger: str, actions: list[dict[str, Any]], context: dict[str,
         elif atype == "chat_open_app":
             msg = result.get("message", "")
             lines.append(f"[app] {msg}")
+
+        elif atype == "list_windows":
+            wins = result.get("windows", [])
+            lines.append(f"**{len(wins)} open windows:**")
+            lines.extend(f"- {w.get('app')}: {w.get('title', '')[:80]}" for w in wins[:12])
+            for bw in result.get("browser_tabs", [])[:3]:
+                tabs = bw.get("tabs", [])
+                if tabs:
+                    lines.append(f"**Tabs in {bw['window'].get('title', 'browser')[:40]}:**")
+                    lines.extend(f"- {'▶ ' if t.get('selected') else ''}{t['title'][:80]}" for t in tabs[:15])
+
+        elif atype == "delegate_task":
+            if result.get("success"):
+                task = result.get("task", {})
+                clarify = next((s for s in task.get("steps", []) if s.get("kind") == "clarify"), {})
+                questions = (clarify.get("output") or {}).get("questions", [])
+                lines.append(
+                    f"Created task **{task.get('title', '')}** for {task.get('agent', 'the AI app')}. "
+                    + ("Before I hand it over, open Tasks and answer:" if questions else
+                       "Open Tasks to review the plan — the hand-off step waits for your approval.")
+                )
+                lines.extend(f"- {q['question']}" + (f" (default: {q['default']})" if q.get("default") else "")
+                             for q in questions)
+            else:
+                lines.append(f"Could not create the task: {result.get('error', 'unknown error')}")
 
         elif atype == "chat_system_command":
             msg = result.get("message", "")

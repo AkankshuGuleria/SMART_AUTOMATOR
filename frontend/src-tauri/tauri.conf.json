@@ -17,19 +17,25 @@
         "width": 1200,
         "height": 800,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "minWidth": 900,
+        "minHeight": 600
       },
       {
-        "title": "AUTOMATA Companion",
+        "title": "AUTOMATA Work Bar",
         "label": "companion",
-        "width": 380,
-        "height": 600,
-        "resizable": true,
+        "width": 760,
+        "height": 470,
+        "resizable": false,
         "fullscreen": false,
         "visible": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
-        "center": true
+        "center": false,
+        "url": "index.html#companion",
+        "decorations": false,
+        "transparent": true,
+        "shadow": false
       }
     ],
     "security": {

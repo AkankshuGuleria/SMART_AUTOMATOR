@@ -21,7 +21,6 @@ import os
 import re
 import subprocess
 import tempfile
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -146,11 +145,9 @@ def launch_editor(project_path: str, editor: str = "code") -> bool:
         subprocess.Popen([editor, project_path], shell=False)
     """
     try:
-        subprocess.Popen(
-            [editor, project_path],
-            shell=False,
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
-        )
+        # The editor is a GUI app; its `code.cmd`-style launcher must not get a
+        # console window of its own (no_console adds CREATE_NO_WINDOW).
+        subprocess.Popen([editor, project_path], shell=False)
         logger.info("os_windows.launch_editor: launched | editor=%s path=%s", editor, project_path)
         return True
     except FileNotFoundError:
@@ -307,6 +304,12 @@ def copy_to_clipboard(text: str) -> bool:
     if not text:
         logger.warning("os_windows.copy_to_clipboard: empty text provided")
         return False
+    # Native Win32 first: exact Unicode (em dashes, emoji, any language), no
+    # PowerShell process, no code-page round-trip.
+    from automation import win32
+
+    if win32.IS_WINDOWS and win32.set_clipboard_text(text):
+        return True
     try:
         if len(text) <= _CLIPBOARD_CMDLINE_LIMIT:
             # Short text — pass directly as a command-line argument
@@ -360,12 +363,21 @@ def read_clipboard() -> str:
 
     Returns the clipboard text on success, or an empty string on failure.
     """
+    from automation import win32
+
+    if win32.IS_WINDOWS:
+        native = win32.get_clipboard_text()
+        if native is not None:
+            return native
     try:
         completed = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw"],
+            ["powershell", "-NoProfile", "-Command",
+             "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Clipboard -Raw"],
             shell=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
         if completed.returncode != 0:
@@ -378,171 +390,36 @@ def read_clipboard() -> str:
         return ""
 
 
-def paste_clipboard() -> bool:
-    """
-    Paste the current clipboard content into the active window.
+def paste_clipboard(target_app: str | None = None) -> bool:
+    """Paste into *target_app* (or the active window) — True only when delivered
+    to a verified window. See automation/desktop.py for the detailed result."""
+    from automation.desktop import paste
 
-    Clipboard reads are available through ``read_clipboard``. This function
-    performs the visible paste action used by cross-app controls.
-    """
-    return send_keystrokes("ctrl+v")
+    return bool(paste(target_app)["success"])
 
 
 def focus_app(app_name: str) -> bool:
-    """
-    Bring a running application window to the foreground.
+    """Bring *app_name* to the foreground; True only if Windows confirms the switch."""
+    from automation.desktop import focus
 
-    Uses PowerShell to find and activate the window by its process name.
-    Returns True on success, False on failure.
-    """
-    try:
-        # Try to find and activate the window via PowerShell Show-Window + Set-ForegroundWindow
-        script = (
-            f"Add-Type -AssemblyName Microsoft.VisualBasic; "
-            f'$proc = Get-Process -Name "{app_name}" -ErrorAction SilentlyContinue; '
-            f"if ($proc) {{ "
-            f"  [Microsoft.VisualBasic.Interaction]::AppActivate($proc.Id); "
-            f'  Write-Output "activated"; '
-            f"}} else {{ "
-            f'  Write-Output "not_found"; '
-            f"}}"
-        )
-        completed = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", script],
-            shell=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        output = completed.stdout.strip()
-        if output == "activated":
-            logger.info("os_windows.focus_app: focused | app=%s", app_name)
-            return True
-        logger.warning("os_windows.focus_app: process not found | app=%s", app_name)
-        return False
-    except Exception as exc:
-        logger.error("os_windows.focus_app: failed | app=%s error=%s", app_name, exc)
-        return False
+    return bool(focus(app_name)["success"])
 
 
-def send_keystrokes(keystrokes: str) -> bool:
-    """
-    Send keystrokes to the active window via PowerShell SendKeys.
+def send_keystrokes(keystrokes: str, target_app: str | None = None) -> bool:
+    """Send an allowed chord; refuses when the target (or AUTOMATA itself) is wrong."""
+    from automation.desktop import press
 
-    Supports limited safe keys: Ctrl+V, Enter, Ctrl+L, Alt+Tab, Tab, Escape.
-    Returns True on success, False on failure.
-    """
-    safe_patterns = {
-        "ctrl+v",
-        "enter",
-        "ctrl+l",
-        "ctrl+enter",
-        "ctrl+return",
-        "alt+tab",
-        "tab",
-        "escape",
-    }
-    normalized = keystrokes.lower().strip()
-    if normalized not in safe_patterns:
-        logger.warning(
-            "os_windows.send_keystrokes: unsafe keystroke rejected | keystrokes=%s",
-            keystrokes,
-        )
-        return False
-    try:
-        # Map safe keystrokes to PowerShell SendKeys notation
-        mapping = {
-            "ctrl+v": "^v",
-            "enter": "~",
-            "ctrl+l": "^l",
-            "alt+tab": "%{tab}",
-            "tab": "{tab}",
-            "escape": "{esc}",
-            "ctrl+enter": "^~",
-            "ctrl+return": "^~",
-        }
-        ps_keys = mapping.get(normalized, keystrokes)
-        script = f'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("{ps_keys}")'
-        completed = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", script],
-            shell=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if completed.returncode != 0:
-            stderr = (completed.stderr or completed.stdout or "").strip()
-            logger.warning("os_windows.send_keystrokes: SendKeys failed — %s", stderr)
-            return False
-        logger.info("os_windows.send_keystrokes: sent | keystrokes=%s", keystrokes)
-        return True
-    except Exception as exc:
-        logger.error("os_windows.send_keystrokes: failed | keystrokes=%s error=%s", keystrokes, exc)
-        return False
+    return bool(press(keystrokes, target_app=target_app)["success"])
 
 
 def capture_screen(region: str | None = None) -> str:
+    """Screenshot the primary screen or a 'left,top,width,height' region.
+
+    Returns the PNG path, or '' on failure. DPI-correct and uniquely named.
     """
-    Capture a screenshot and save it to a temp file.
+    from automation.desktop import capture
 
-    Args:
-        region: Optional region string in format "left,top,width,height".
-                If None, captures the full screen.
-
-    Returns the path to the saved screenshot image, or an empty string on failure.
-    """
-    try:
-        tmp_dir = tempfile.gettempdir()
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = os.path.join(tmp_dir, f"automata_screen_{timestamp}.png")
-
-        if region:
-            # Parse "left,top,width,height"
-            parts = [p.strip() for p in region.split(",")]
-            if len(parts) != 4:
-                logger.warning(
-                    "os_windows.capture_screen: invalid region format | region=%s", region
-                )
-                return ""
-            left, top, width, height = parts
-            script = (
-                f"Add-Type -AssemblyName System.Drawing; "
-                f"$bmp = New-Object System.Drawing.Bitmap([int]$width, [int]$height); "
-                f"$gfx = [System.Drawing.Graphics]::FromImage($bmp); "
-                f"$gfx.CopyFromScreen([int]$left, [int]$top, 0, 0, "
-                f"[System.Drawing.Size]::new([int]$width, [int]$height)); "
-                f'$bmp.Save("{path}", [System.Drawing.Imaging.ImageFormat]::Png); '
-                f'$gfx.Dispose(); $bmp.Dispose(); Write-Output "saved"'
-            )
-        else:
-            script = (
-                f"Add-Type -AssemblyName System.Drawing; "
-                f'[System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") | Out-Null; '
-                f"$bmp = New-Object System.Drawing.Bitmap("
-                f"[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width, "
-                f"[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); "
-                f"$gfx = [System.Drawing.Graphics]::FromImage($bmp); "
-                f"$gfx.CopyFromScreen(0, 0, 0, 0, $bmp.Size); "
-                f'$bmp.Save("{path}", [System.Drawing.Imaging.ImageFormat]::Png); '
-                f'$gfx.Dispose(); $bmp.Dispose(); Write-Output "saved"'
-            )
-
-        completed = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", script],
-            shell=False,
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        if completed.returncode != 0 or "saved" not in completed.stdout:
-            stderr = (completed.stderr or completed.stdout or "").strip()
-            logger.warning("os_windows.capture_screen: capture failed — %s", stderr)
-            return ""
-        logger.info("os_windows.capture_screen: captured | path=%s", path)
-        return path
-    except Exception as exc:
-        logger.error("os_windows.capture_screen: failed — %s", exc)
-        return ""
+    result = capture(region=region)
+    return result["path"] if result["success"] else ""
 
 
-# Maps common friendly names to Windows executable names

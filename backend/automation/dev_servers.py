@@ -176,55 +176,54 @@ def _get_default_server_configs(project_id: str) -> list[dict]:
     ]
 
 
+def _port_in_use(port: int) -> bool:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.3)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
 def start_project_dev_servers(repo_path: str) -> list[dict]:
+    """Start each app's dev command from the detected run book (one console each).
+
+    Uses intelligence.profile, so Next.js, Django, Vite, FastAPI… each get their
+    own real command. Apps whose usual port is already serving are skipped (no
+    duplicate servers, e.g. restoring AUTOMATA while its backend runs).
+    """
+    from intelligence.profile import detect
+
+    profile = detect(repo_path)
+    if not profile.get("ok"):
+        return [{"server": "dev", "status": "error", "detail": profile.get("error", "profile failed")}]
     results: list[dict] = []
-
-    frontend_dir = repo_path
-    if not os.path.isfile(os.path.join(repo_path, "package.json")) and os.path.isfile(
-        os.path.join(repo_path, "frontend", "package.json")
-    ):
-        frontend_dir = os.path.join(repo_path, "frontend")
-
-    if os.path.isfile(os.path.join(frontend_dir, "package.json")):
+    for entry in profile["run_book"]:
+        cmd = entry["commands"].get("dev") or entry["commands"].get("start")
+        name = entry["path"] if entry["path"] != "." else entry["language"]
+        if not cmd:
+            results.append({"server": name, "status": "skipped", "detail": "no dev/start command"})
+            continue
+        app = next((a for a in profile["apps"] if a["path"] == entry["path"]), {})
+        port = next(
+            (DEFAULT_PORTS_BY_FW[f] for f in app.get("frameworks", []) if f in DEFAULT_PORTS_BY_FW), None
+        )
+        if port and _port_in_use(port):
+            results.append({"server": name, "status": "skipped", "detail": f"port {port} already serving"})
+            continue
+        cwd = os.path.join(repo_path, entry["path"]) if entry["path"] != "." else repo_path
         try:
             subprocess.Popen(
-                "npm run dev",
-                cwd=frontend_dir,
-                shell=True,
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
+                cmd, cwd=cwd, shell=True, creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
             )
-            results.append(
-                {"server": "frontend", "status": "ok", "detail": f"started in {frontend_dir}"}
-            )
+            results.append({"server": name, "status": "ok", "detail": f"`{cmd}` in {cwd}"})
         except Exception as exc:
-            results.append({"server": "frontend", "status": "error", "detail": str(exc)})
-    else:
-        results.append(
-            {"server": "frontend", "status": "skipped", "detail": "no package.json found"}
-        )
-
-    backend_dir = repo_path
-    if not os.path.isfile(os.path.join(repo_path, "pyproject.toml")) and os.path.isfile(
-        os.path.join(repo_path, "backend", "pyproject.toml")
-    ):
-        backend_dir = os.path.join(repo_path, "backend")
-
-    if os.path.isfile(os.path.join(backend_dir, "pyproject.toml")):
-        try:
-            subprocess.Popen(
-                "uv run python main.py",
-                cwd=backend_dir,
-                shell=True,
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
-            )
-            results.append(
-                {"server": "backend", "status": "ok", "detail": f"started in {backend_dir}"}
-            )
-        except Exception as exc:
-            results.append({"server": "backend", "status": "error", "detail": str(exc)})
-    else:
-        results.append(
-            {"server": "backend", "status": "skipped", "detail": "no pyproject.toml found"}
-        )
-
+            results.append({"server": name, "status": "error", "detail": str(exc)})
+    if not results:
+        results.append({"server": "dev", "status": "skipped", "detail": "no runnable app detected"})
     return results
+
+
+DEFAULT_PORTS_BY_FW = {
+    "Vite": 5173, "Next.js": 3000, "Nuxt": 3000, "SvelteKit": 5173, "Angular": 4200,
+    "FastAPI": 8000, "Django": 8000, "Flask": 5000, "Streamlit": 8501,
+}

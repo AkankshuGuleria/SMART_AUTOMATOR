@@ -49,6 +49,11 @@ class IntentType(str, Enum):
     REVIEW_VISIBLE_DESIGN = "review_visible_design"
     GENERATE_PROMPT_FROM_SCREEN = "generate_prompt_from_screen"
     VERIFY_VISIBLE_RESULT = "verify_visible_result"
+    # Workspace intents (smart-workspace plan, phases 3–4)
+    DELEGATE_TASK = "delegate_task"
+    SWITCH_TAB = "switch_tab"
+    TYPE_TEXT = "type_text"
+    LIST_WINDOWS = "list_windows"
     UNKNOWN = "unknown"
 
 
@@ -69,7 +74,47 @@ class IntentParser:
     """
 
     # (IntentType, compiled_pattern)
+    _AGENT_APPS = r"(antigravity|claude(?:\s+code)?|cursor|vs\s*code|vscode|chatgpt|chat\s*gpt)"
+    _WORK_VERBS = r"(?:build|create|make|implement|develop|fix|add|write|refactor|design|generate|set\s*up|scaffold)"
+
     _patterns = [
+        # ── Delegate a multi-step task to another AI app ─────────────────────────
+        # "using antigravity create a website", "build a landing page with claude"
+        (
+            IntentType.DELEGATE_TASK,
+            re.compile(
+                r"\b(?:using|use|with|in|via|through|ask|tell|get)\s+" + _AGENT_APPS + r"\b.*?\b" + _WORK_VERBS + r"\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            IntentType.DELEGATE_TASK,
+            re.compile(
+                r"\b" + _WORK_VERBS + r"\b.+?\b(?:using|with|in|via|through)\s+" + _AGENT_APPS + r"\b",
+                re.IGNORECASE,
+            ),
+        ),
+        # ── Window / tab control ─────────────────────────────────────────────────
+        (
+            IntentType.SWITCH_TAB,
+            re.compile(r"\b(?:switch|go|change|jump)\s+to\s+(?:the\s+|my\s+)?(.+?)\s+tab\b", re.IGNORECASE),
+        ),
+        (
+            IntentType.LIST_WINDOWS,
+            re.compile(
+                r"\b(?:list|show|which|what)\b.*\b(?:open\s+)?(windows|tabs|apps)\b.*\b(?:open|running)?\b"
+                r"|\bwhat(?:'s| is)\s+open\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            IntentType.TYPE_TEXT,
+            re.compile(
+                r"\btype\s+[\"'“‘](.+?)[\"'”’]\s+(?:in|into)\s+(?:the\s+)?(.+?)\s*$"
+                r"|\btype\s+(.+?)\s+(?:in|into)\s+(?:the\s+)?(.+?)\s*$",
+                re.IGNORECASE,
+            ),
+        ),
         # ── Compound: "open [ai_tool] and generate/give/send a prompt" ──────────
         # Must appear BEFORE OPEN_BROWSER so that compound requests like
         # "open claude and generate a prompt..." are routed to SUBMIT_PROMPT
@@ -399,6 +444,16 @@ class IntentParser:
                 if intent in (IntentType.OPEN_BROWSER, IntentType.OPEN_APP):
                     # Use the full raw message as the target so agent_actions can parse it
                     target = text
+                elif intent == IntentType.DELEGATE_TASK:
+                    app_name = re.sub(r"\s+", "", (m.group(1) or "").lower()).replace("claudecode", "claude")
+                    app_name = {"vscode": "vscode", "chatgpt": "chatgpt"}.get(app_name, app_name)
+                    target = text
+                    prompt_text = text
+                elif intent == IntentType.TYPE_TEXT:
+                    groups = [g for g in m.groups() if g]
+                    prompt_text = groups[0].strip() if groups else ""
+                    app_name = groups[1].strip().lower() if len(groups) > 1 else ""
+                    target = prompt_text
                 elif intent == IntentType.SUBMIT_PROMPT:
                     # Extract app_name and prompt from the compound message
                     # Pattern: "open <app> and <action> <prompt>"

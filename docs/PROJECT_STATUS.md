@@ -1,120 +1,137 @@
 # Project status and feature checklist
 
-Last full review: 2026-10-26. "Verified" means an automated test asserts the
-behaviour **and/or** it was exercised against the running app on the dev
-laptop (Windows 11, RTX 3050). Nothing here is marked verified just because a
-screen or route exists.
+Last full verification: **2026-10-26** on the dev laptop (Windows 11, 16 GB RAM,
+RTX 3050 4 GB). "Verified" means an automated test asserts it **and/or** it was
+exercised against the running app. Nothing is marked verified because a screen
+or route exists.
 
-Legend: ✅ verified · ⚠️ works with a caveat · ⬜ not verified this pass · ❌ missing
+Legend: ✅ verified · ⚠️ works with a caveat · ⬜ not verified · ❌ missing
 
-## Health checks at the end of this pass
+## Health at the end of this pass
 
 | Check | Result |
 | --- | --- |
-| Backend tests (`uv run pytest tests/`) | ✅ 215 passed, isolated from the real DB and model APIs |
-| Frontend type-check (`tsc -b`) | ✅ clean |
-| Frontend lint (`oxlint`) | ✅ no warnings |
-| Frontend tests (`npm test`) | ✅ 3 passed |
-| Frontend production build | ✅ startup bundle ~260 KB (was 918 KB) |
-| Live run (backend + Vite UI) | ✅ all 8 screens load; no console errors besides restart reconnects |
+| Backend tests `uv run pytest tests/` | ✅ 350 passed (isolated from real DB, providers, keyboard, screen) |
+| Frontend `tsc -b` / `oxlint` / `npm test` | ✅ clean / clean / 5 passed |
+| Frontend production build | ✅ startup bundle ≈260 KB; screens lazy-loaded |
+| Desktop app `npx tauri build --no-bundle` | ✅ `app.exe` built (10.8 MB) |
+| Live API end-to-end script (22 checks) | ✅ 22/22 |
+| Live UI: Dashboard, Tasks, Inbox, Setup, Resources, Companion | ✅ rendered against the real backend |
+| Live desktop app: tray, close-to-tray, single instance, `--hidden`, backend supervisor | ✅ |
 
 ## Feature checklist
 
-### Core
+### Always-on workspace (Phase 1)
+
+| Feature | Status | Evidence / notes |
+| --- | --- | --- |
+| Tray app; closing the window hides to tray | ✅ | Live: process kept running after close |
+| Single instance | ✅ | Live: second launch exited |
+| Start at sign-in (app, hidden) | ✅ | Settings toggle via tauri-plugin-autostart; `--hidden` start verified. Off until the user turns it on |
+| Backend supervisor (start/restart agent) | ✅ | Live: app started `pythonw main.py` when port 8000 was free; logs to `%LOCALAPPDATA%\AUTOMATA\agent.log` |
+| Native notifications (task needs approval, new needs) | ⚠️ | Wired; not observed on screen in this pass |
+| AI work bar (Alt+Space / Ctrl+Alt+A) | ✅ | Live in the built app: opens top-centre with focus, second press hides, hides on click-away. It was broken before (toggled on key-down and key-up) |
+| No console windows popping up | ✅ | Every child process gets CREATE_NO_WINDOW (`automation/no_console.py`); live: no console windows while self-check / agent status / media endpoints ran |
+| Self-check screen with fix hints | ✅ | Live: 10 checks |
+
+### Memory continuity (Phase 1)
+
+| Feature | Status | Evidence / notes |
+| --- | --- | --- |
+| Local offline memory (SQLite FTS5) | ✅ | Tests + live: 1 100+ memories mirrored |
+| Cloud → local sync (idempotent) | ✅ | Live: commits/decisions/edits/terminal mirrored |
+| Projects work without CockroachDB | ✅ | Test: register/list/get fall back to local store |
+| Chat answers grounded in local memory | ✅ | Test + live companion answer. Ranking by term coverage, kind weight and recency; results de-duplicated (`tests/test_memory_quality.py`) |
+| Duplicate-free capture | ✅ | Terminal capture resumes from its saved history position; writes de-duplicated by content; reads (access-time events) no longer count as edits. Live: 9,108 duplicate rows removed, re-activation adds none |
+| Chat turns and briefs remembered | ✅ | Tests |
+| Session snapshot (every 10 min, on idle, on shutdown, manual) | ✅ | Live: branch, 30 changed files, 10 recent files, dev servers 5173/8000, current task |
+| Resume workspace (editor + recent files, terminal, dev servers) | ✅ | Tests (launches mocked); skips servers already running |
+| Capture follows the selected project | ✅ | Live: activate → 3 capture threads on D:\AUTOMATA |
+| Terminal capture for any project | ✅ | Fixed: old check used the backend's own folder |
+| Semantic (vector) search offline | ⚠️ | Needs Ollama `nomic-embed-text` or the `local-ai` extra; keyword search always works |
+
+### Local AI / offline (Phase 1)
+
+| Feature | Status | Evidence / notes |
+| --- | --- | --- |
+| Offline detection → skip cloud, use Ollama | ✅ | Test |
+| "Which model answered" | ✅ | Live: Setup shows "last answer: OpenRouter" |
+| Model recommendation for this PC | ✅ | Live: qwen2.5-coder:3b for 4 GB VRAM |
+| Install Ollama / download model with progress / select model | ⚠️ | UI + API tested with mocks; **Ollama is not installed** on this PC yet |
+| `OLLAMA_*` settings respected | ✅ | Fixed: were hard-coded |
+| Fast Ollama probe | ✅ | Fixed: each check cost 2–4 s when Ollama is off (Windows refused-connect delay); now ≤150 ms |
+
+### Project intelligence (Phase 2)
+
+| Feature | Status | Evidence / notes |
+| --- | --- | --- |
+| Stack, package managers, DBs, infra, ports | ✅ | Tests (Next.js+Prisma, Django, empty) + live on this repo |
+| Run book (install/dev/build/test) | ✅ | Used by restore, resume and task verification |
+| Env requirements (names only, set/missing, example defaults) | ✅ | Tests confirm values never leave files |
+| Modules from the project's own structure + explained score | ✅ | Replaced the fixed AUTOMATA module list everywhere |
+| Profile injected into chat and agent prompts | ✅ | Live: task prompt contains the stack |
+
+### Desktop control (Phases 0 + 3)
+
+| Feature | Status | Evidence / notes |
+| --- | --- | --- |
+| Focus app (verified by Windows) | ✅ | Live probe + tests; multi-process apps handled |
+| Keys / paste only into a verified target; never into AUTOMATA | ✅ | Live probe + tests; kill-switch in tests |
+| Type text with read-back (UIA, then OCR) | ✅ | Tests |
+| Browser tabs: list / switch (UI Automation) | ✅ | Live: listed Edge tabs; switch verified in tests |
+| List open windows ("what windows are open") | ✅ | Live |
+| OCR (Windows engine) + DPI-correct capture | ✅ | Live: exact text; 1920×1080 capture |
+| Prompt handoff: confirms paste before Enter, restores clipboard | ✅ | Live probe + tests |
+
+### Agent tasks & Needs inbox (Phase 4)
+
+| Feature | Status | Evidence / notes |
+| --- | --- | --- |
+| "using antigravity …" → task with 8 steps | ✅ | Live via chat |
+| Clarifying questions (folder / save location, stack, features, design, extra) | ✅ | Tests + live: form in Tasks; folder created after answering; answers in the prompt |
+| Approval gates (hand-off, build) | ✅ | Live: stopped at hand-off; tests cover the full flow |
+| Antigravity IDE: open folder → Agent panel → paste into "Message input" → read back | ✅ | Live on a scratch folder: launched the IDE, pressed Ctrl+L when the panel was closed, text confirmed via UIA, a draft is never overwritten |
+| Antigravity: full delegation end to end | ✅ | Live 2026-10-26: questions → folder created → prompt sent (box emptied, 4 s) → agent created `hello.html` in 14 s → watch saw 1 file → report. Antigravity then shows the change for you to Accept/Reject |
+| Unicode-safe clipboard | ✅ | Native Win32 clipboard (no PowerShell): the first live run stopped because an em dash came back garbled through PowerShell's code page; now exact for any text, 9 ms |
+| VS Code via `code chat --mode agent` | ⚠️ | Its chat box is a generic editor field, so delivery is reported as unconfirmed |
+| Claude | ⚠️ | Claude app via the chat-box adapter (not probed live: this session runs inside it); Claude Code CLI not installed |
+| ChatGPT (browser) | ⚠️ | Verified handoff logic; not run live |
+| Cursor | ⚠️ | Chat-box adapter (Ctrl+L) when `cursor-agent` is missing; not probed live |
+| Watch for file changes, run build/tests, report | ✅ | Tests with a fake agent editing a temp repo |
+| Needs inbox with instructions per provider | ✅ | Live + tests; stale items close automatically |
+| Save values to Credential Manager and/or `.env` (git-ignore check) | ✅ | Tests (keyring mocked) |
+| Tasks survive restart (paused, resumable) | ✅ | Test |
+
+### Work bar, media and screen (2026-10-26)
+
+| Feature | Status | Evidence / notes |
+| --- | --- | --- |
+| Play / pause / next / previous / volume (system media keys) | ✅ | Live: each step confirmed through the Windows media session |
+| "play <x> on spotify" | ✅ | Live: search → top result's Play via UIA → player confirmed playing (3.5 s) |
+| What's playing | ✅ | Live (0.4 s) |
+| Web search (google, youtube, github, …) | ✅ | Tests (URL); opens the default browser |
+| Read / explain my screen (only on request) | ✅ | Live: explained a NameError shown in Notepad; image deleted after OCR |
+| Main window recovers when it opens before the agent | ✅ | Health polls every 3 s while offline; screens reload once it is online |
+
+### Earlier features (re-checked)
 
 | Feature | Status | Notes |
 | --- | --- | --- |
-| Backend starts, `/health` reports DB/provider state | ✅ | Live: DB connected |
-| UI shows offline banner when backend is down | ✅ | |
-| Tauri desktop shell | ⬜ | Not built or run in this pass |
-| Selected project remembered across restarts | ✅ | `localStorage`, falls back to first project |
+| System resources (CPU/GPU/RAM/disk/network/processes) | ✅ | GPU utilisation retries (laptop GPU answers ~every 2.5 s) |
+| App-usage tracking + analysis | ✅ | |
+| Morning brief (works offline from local memory) | ✅ | |
+| Workspace restore (honest, run-book commands, no duplicate servers) | ✅ | |
+| Chat intents, approvals, workflows API | ✅ | Workflows have no dedicated screen |
+| Memory graph, analytics, activity feed | ✅ | |
 
-### Projects
+## What is left / known limits
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Register project | ✅ | Rejects missing folders (422), returns existing project for a duplicate path, reports DB failure (503) instead of a fake success |
-| Project list / switcher / insights | ✅ | Insights polling reduced from 3–10 s to 15–30 s |
-| Existing project **SAM MOTO FINAL** | ⚠️ | Stored path is `SAM_MOTO_FINAL` (relative), so git, restore and branch fail. Re-register it with its full folder path |
-
-### Memory capture
-
-| Feature | Status | Notes |
-| --- | --- | --- |
-| File-edit capture | ✅ | Fixed: now ignores `node_modules`, `.venv`, `.git`, `dist`, `target`, caches, lock/minified files; one row per file per 30 s |
-| Commit capture, terminal capture | ✅ | Threads start live; covered by existing tests |
-| Secret redaction before storage | ✅ | Tests |
-| Capture follows the selected project | ⚠️ | Capture starts at backend launch for the newest registered project only; switching projects in the UI does not move it |
-| Embeddings / vector search | ⚠️ | Live: Cohere returns 429 (rate limit), Groq has no embedding model, Ollama is not running. Retrieval falls back to recent memories |
-
-### Chat and agent actions
-
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Intent routing + action cards + approval | ✅ | 30+ intent tests restored |
-| Desktop commands without a project ("open spotify", clipboard, screen) | ✅ | Fixed: previously refused with "No project selected" |
-| Agent replies rendered safely | ✅ | Fixed: HTML is escaped before formatting (was an XSS path for captured text) |
-| Command palette "Ask AI" | ✅ | Fixed: was never wired to the chat screen |
-| Commit message, find auth, continue work, summary, dev env | ⚠️ | Unit tests pass; not exercised live (needs a valid project path and an AI provider) |
-| Reasoning providers (Groq → OpenRouter → Gemini → Cohere → NVIDIA → MiniMax → Bedrock → Ollama) | ✅ | Order test fixed; duplicate provider loop removed |
-
-### Brief, restore, workflows
-
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Morning brief on the dashboard | ✅ | New card: highlights, pending items, last edited file, refresh, "Restore & continue". Falls back to plain text when no AI provider answers |
-| Workspace restore | ✅ | Fixed: no longer reports "fully restored" after failures; stops before opening terminal/editor when the folder is missing; readable dev-server detail |
-| Browser-tab restore | ❌ | Backend step is a placeholder |
-| Workflow engine (checkpoints, approval gates) | ⚠️ | API + tests only; no UI screen |
-| Cross-app control, screen capture, OCR | ⚠️ | Unit tests only; OCR depends on locally installed tooling |
-
-### Analytics
-
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Activity feed | ✅ | Auto-refreshes every 30 s; clear message when no project is selected |
-| Project analytics, live metrics, module readiness | ✅ | Expensive checks (Ollama probe, tool versions) now cached |
-| Memory graph | ✅ | Fixed quadratic same-day edges (8 nodes: 28 → 7 edges) and filler-word keyword matches |
-
-### New in this pass
-
-| Feature | Status | Notes |
-| --- | --- | --- |
-| CPU / GPU / RAM / disk / network / battery monitor | ✅ | Live: RTX 3050 utilisation, VRAM, temperature, power; per-thread CPU; top processes grouped by name |
-| Background app-usage tracking | ✅ | Live: records focused app, skips idle (2 min), local SQLite, redacted titles |
-| Usage analysis (today / 7 days / 30 days) | ✅ | Time per app and category, timeline, hourly/daily charts, focus %, switches, longest session |
-| Pause / resume tracking | ✅ | Resources → App usage, and Settings |
-| Start at sign-in (hidden background agent) | ✅ | Toggle in Settings; tested against a temp folder. **Not switched on** on this PC — that is your choice |
-| Dashboard live resource tiles + today's usage card | ✅ | Replaced hard-coded "unavailable" placeholders |
-
-## Optimisations made
-
-- 38 blocking API routes moved off the event loop (a 45 s AI call no longer freezes every other request).
-- `/tools/status` cached 5 min (it spawned 4 processes, including PowerShell, on every 5 s poll).
-- Reasoning-backend availability cached 30 s (its Ollama probe could take 2 s per poll).
-- System sampler: 2 s while viewed, 15 s otherwise; process scan only on demand.
-- All frontend polling goes through `usePolling` (pauses while hidden, never overlaps).
-- Screens lazy-loaded; 11 unused npm packages removed (three.js, @react-three, 7 Radix packages, clsx).
-- File watcher no longer floods the DB and embedding APIs during installs/builds.
-
-## Cleanup
-
-Removed 30 dead or duplicate files: 12 unreachable frontend screens/components
-and assets, 9 root-level doc stubs (docs live in `docs/`), 4 ad-hoc root
-scripts (one printed raw env values), 2 broken test-runner scripts, a duplicate
-76 MB `uv.exe`, and 6 stub test files. The 22 real backend test files that had
-been overwritten with a placeholder were restored from git and fixed.
-
-## What is left
-
-1. Re-register **SAM MOTO FINAL** with its full folder path.
-2. Get embeddings working: run Ollama with `nomic-embed-text`, or use a provider key without the 429 limit.
-3. Decide whether to enable **Start at sign-in** (Settings → Background agent).
-4. Make capture follow the selected project without restarting the backend.
-5. Build and test the Tauri desktop app; add a tray icon / close-to-background.
-6. Add a workflow screen (approve/reject gates from the UI).
-7. Implement browser-tab restore or remove the step.
-8. Grow frontend tests (3 today) and run the manual items in `QA_CHECKLIST.md`.
-9. `.kilo/worktrees/` holds two extra git worktrees (124 MB); one has 15 uncommitted changes. Review, then `git worktree remove` if unneeded.
-10. Drive `C:` is 95% full (about 12 GB free).
-11. The API has no authentication; keep it bound to `127.0.0.1`.
+1. **Install Ollama** (Setup → Local AI) and download `qwen2.5-coder:3b` + `nomic-embed-text` for full offline AI and semantic search. C: has ~7 GB free; set `OLLAMA_MODELS` to a folder on D: if space runs low.
+2. **Try a real delegation**: "using antigravity …" → approve the hand-off. The CLI path is verified; the end-to-end agent run is yours to watch.
+3. **Turn on Start at sign-in** in Settings (inside the desktop app) if you want it always running.
+4. Re-register **SAM MOTO FINAL** with its full folder path (stored as `SAM_MOTO_FINAL`).
+5. No installer yet (`tauri build` with bundling needs WiX/NSIS); the backend still runs from the repo's `backend/.venv` (no PyInstaller sidecar yet).
+6. Workflow engine has no UI; Cursor needs `cursor-agent`; browser-tab restore on resume is not implemented.
+7. API has no authentication — keep it bound to 127.0.0.1.
+8. `.kilo/worktrees/` holds two extra git worktrees (one with uncommitted changes) — review before deleting.
+9. C: drive is ~97 % full.

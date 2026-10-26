@@ -127,74 +127,112 @@ def health_check() -> dict:
 
 
 def insert_project(name: str, repo_path: str, remote_url: str | None = None) -> str | None:
-    """Insert a new project. Returns the project UUID or None on failure."""
+    """Insert a project in CockroachDB and the local store; local-only when offline.
+
+    Returns the project id. When the cloud DB is unreachable the project is
+    created locally (source='local') so the workspace keeps working offline.
+    """
     from sqlalchemy import text
 
     from db.client import get_session
+    from memory.local_store import get_store
 
     with get_session() as session:
-        if session is None:
-            return None
-        try:
-            result = session.execute(
-                text(
-                    "INSERT INTO projects (name, repo_path, remote_url) "
-                    "VALUES (:name, :repo_path, :remote_url) "
-                    "RETURNING id"
-                ),
-                {"name": name, "repo_path": repo_path, "remote_url": remote_url},
-            )
-            row = result.fetchone()
-            return str(row[0]) if row else None
-        except Exception as exc:
-            logger.error("db/client: insert_project failed — %s", exc)
-            return None
+        if session is not None:
+            try:
+                result = session.execute(
+                    text(
+                        "INSERT INTO projects (name, repo_path, remote_url) "
+                        "VALUES (:name, :repo_path, :remote_url) "
+                        "RETURNING id"
+                    ),
+                    {"name": name, "repo_path": repo_path, "remote_url": remote_url},
+                )
+                row = result.fetchone()
+                if row:
+                    pid = str(row[0])
+                    get_store().upsert_project(
+                        {"id": pid, "name": name, "repo_path": repo_path, "remote_url": remote_url},
+                        source="cloud",
+                    )
+                    return pid
+            except Exception as exc:
+                logger.error("db/client: insert_project failed — %s", exc)
+    try:
+        project = get_store().upsert_project(
+            {"name": name, "repo_path": repo_path, "remote_url": remote_url}, source="local"
+        )
+        logger.info("db/client: project stored locally (cloud DB unavailable) | %s", project["id"])
+        return str(project["id"])
+    except Exception as exc:
+        logger.error("db/client: local insert_project failed — %s", exc)
+        return None
 
 
 def get_projects() -> list[dict]:
-    """Return all projects."""
+    """All projects: cloud rows (mirrored locally) plus local-only projects.
+
+    Falls back to the local store when CockroachDB is unreachable.
+    """
     from sqlalchemy import text
 
     from db.client import get_session
+    from memory.local_store import get_store
 
+    cloud: list[dict] | None = None
     with get_session() as session:
-        if session is None:
-            return []
-        try:
-            result = session.execute(
-                text(
-                    "SELECT id, name, repo_path, remote_url, created_at "
-                    "FROM projects ORDER BY created_at DESC"
+        if session is not None:
+            try:
+                result = session.execute(
+                    text(
+                        "SELECT id, name, repo_path, remote_url, created_at "
+                        "FROM projects ORDER BY created_at DESC"
+                    )
                 )
-            )
-            return [dict(row._mapping) for row in result.fetchall()]
-        except Exception as exc:
-            logger.error("db/client: get_projects failed — %s", exc)
-            return []
+                cloud = [dict(row._mapping) for row in result.fetchall()]
+            except Exception as exc:
+                logger.error("db/client: get_projects failed — %s", exc)
+    try:
+        store = get_store()
+        if cloud is None:
+            return store.list_projects()
+        for project in cloud:
+            store.upsert_project(project, source="cloud")
+        cloud_ids = {str(p["id"]) for p in cloud}
+        local_only = [p for p in store.list_projects() if p["source"] == "local" and p["id"] not in cloud_ids]
+        return cloud + local_only
+    except Exception as exc:
+        logger.warning("db/client: local project store unavailable — %s", exc)
+        return cloud or []
 
 
 def get_project(project_id: str) -> dict | None:
-    """Return a single project by ID."""
+    """Return a single project by id (cloud first, then the local store)."""
     from sqlalchemy import text
 
     from db.client import get_session
 
     with get_session() as session:
-        if session is None:
-            return None
-        try:
-            result = session.execute(
-                text(
-                    "SELECT id, name, repo_path, remote_url, created_at "
-                    "FROM projects WHERE id = :id"
-                ),
-                {"id": project_id},
-            )
-            row = result.fetchone()
-            return dict(row._mapping) if row else None
-        except Exception as exc:
-            logger.error("db/client: get_project failed — %s", exc)
-            return None
+        if session is not None:
+            try:
+                result = session.execute(
+                    text(
+                        "SELECT id, name, repo_path, remote_url, created_at "
+                        "FROM projects WHERE id = :id"
+                    ),
+                    {"id": project_id},
+                )
+                row = result.fetchone()
+                if row:
+                    return dict(row._mapping)
+            except Exception as exc:
+                logger.error("db/client: get_project failed — %s", exc)
+    try:
+        from memory.local_store import get_store
+
+        return get_store().get_project(str(project_id))
+    except Exception:
+        return None
 
 
 # ─── Sessions CRUD ───────────────────────────────────────────────────────────

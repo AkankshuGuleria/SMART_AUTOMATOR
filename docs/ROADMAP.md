@@ -1,48 +1,25 @@
-# MVP stabilization roadmap
+# Roadmap
 
-## Current phase
+## Done (2026-10-26)
 
-**MVP stabilization and verification.** Feature implementations exist across
-the frontend and backend, but the project needs repeatable end-to-end
-verification before all features can be described as working. This pass
-replaces project documentation and leaves runtime code unchanged.
+- Project review, cleanup, monitoring and app usage.
+- Smart-workspace Phases 0–5 (see `SMART_WORKSPACE_PLAN.md`): honest desktop
+  automation, always-on tray app with backend supervisor, offline local memory,
+  model router with Ollama setup, session snapshots/resume, project profiles,
+  window/tab control with read-back, delegation tasks with approval gates, Needs
+  inbox, Tasks/Inbox/Setup screens, AI work bar.
+- Work bar (Alt+Space / Ctrl+Alt+A): media + Spotify, web search, read screen on
+  request; clarifying questions before delegation; verified Antigravity chat-box
+  hand-off; no console popups.
 
-## Completed in this documentation pass
+Evidence and remaining limits: `PROJECT_STATUS.md`.
 
-- [x] Replaced hackathon-era overview and progress material with product
-  scope, current architecture, data, API, security, setup, user, and QA docs.
-- [x] Documented the current source layout and module boundaries without
-  moving runtime files.
-- [x] Recorded the distinction between implemented code paths and verified
-  MVP behavior.
-- [x] Cleared all old tests; new tests to be written for upcoming features.
+## Next
 
-## Next work
-
-1. **Establish a repeatable local baseline**
-   - Set up a disposable CockroachDB database and test project.
-   - Confirm backend health, frontend connectivity, and the supported start
-     commands from `docs/DEVELOPMENT.md`.
-2. **Verify one product surface at a time**
-   - Use `docs/QA_CHECKLIST.md` to capture reproducible steps, expected result,
-     actual result, and evidence for each screen/feature.
-   - Fix and test a single reported defect before moving to the next.
-3. **Close MVP reliability gaps**
-   - Validate capture/retrieval quality, approval gates, restore reporting,
-     provider/database degraded states, and Windows desktop behavior.
-4. **Release readiness**
-   - Complete the security and manual acceptance checks.
-   - Remove stale, redundant UI paths only after confirming their callers and
-     tests.
-
-## Known boundaries
-
-- Windows is the only documented OS automation target.
-- The backend needs configured persistence for durable memory.
-- Model and OCR integrations depend on local services, credentials, or
-  platform tools.
-- This repository does not document a production deployment or authenticated
-  multi-user API.
-
-Do not mark a roadmap item complete based only on a module, route, or screen
-existing in the repository.
+1. Packaging: PyInstaller sidecar for the backend + Tauri installer (NSIS/MSI).
+2. Live-verify the Antigravity / VS Code / ChatGPT hand-off end to end and tune
+   prompts from real runs.
+3. Workflow screen (approve/reject workflow gates in the UI).
+4. Cursor via `cursor-agent`; Claude Code CLI as the preferred Claude path.
+5. Browser-tab restore during resume; per-app adapters for more apps.
+6. Optional API token for the local API.

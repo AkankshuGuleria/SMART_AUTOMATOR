@@ -1,10 +1,10 @@
 /**
- * lib/api.ts — AUTOMATA typed API client
+ * lib/api.ts â€” AUTOMATA typed API client
  *
  * Owns:    All HTTP and WebSocket communication between the React frontend
  *          and the Python FastAPI backend.
  * Never:   Must not contain UI logic. Must not talk directly to CockroachDB
- *          or Bedrock — all backend calls go through this module.
+ *          or Bedrock â€” all backend calls go through this module.
  */
 
 
@@ -23,7 +23,7 @@ const WS_BASE = () => {
 };
 const WS_URL = `${WS_BASE()}/ws`;
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface HealthStatus {
   api: "ok" | "error";
@@ -51,7 +51,7 @@ export interface MorningBrief {
   generated_at: string;
 }
 
-// ─── System resources & app usage ─────────────────────────────────────────────
+// â”€â”€â”€ System resources & app usage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface GpuDevice {
   index: number;
@@ -163,6 +163,8 @@ export type AgentEventType =
   | "restore_progress"
   | "brief_ready"
   | "autonomous_action"
+  | "task_update"
+  | "file"
   | "echo";
 
 export interface AgentEvent {
@@ -275,7 +277,7 @@ export interface EndSessionResult {
   error?: string;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const target = url.startsWith("http") ? url : `${API_BASE}${url}`;
@@ -362,7 +364,7 @@ export interface MemoryGraphData {
   edges: MemoryGraphEdge[];
 }
 
-// ─── API functions ────────────────────────────────────────────────────────────
+// â”€â”€â”€ API functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function getHealth(): Promise<HealthStatus> {
   return apiFetch<HealthStatus>("/health");
@@ -589,7 +591,252 @@ export async function setAutostart(enabled: boolean): Promise<AutostartStatus> {
   });
 }
 
-// ─── WebSocket ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Smart workspace: AI setup, memory, snapshots, profile, desktop, tasks â”€â”€â”€
+
+export interface OllamaStatus {
+  installed: boolean;
+  exe?: string | null;
+  running: boolean;
+  url?: string;
+  models: string[];
+  chat_model: string;
+  chat_model_ready: boolean;
+  embedding_model: string;
+  embedding_model_ready: boolean;
+}
+
+export interface AiStatus {
+  online: boolean;
+  reasoning_mode: string;
+  cloud_providers: Record<string, boolean>;
+  ollama: OllamaStatus;
+  offline_embeddings: { installed: boolean; enabled: boolean; model: string; loaded: boolean };
+  last_answer: { provider: string | null; model: string | null; at: number | null };
+}
+
+export interface LocalModelInfo { name: string; size_gb: number; min_vram_gb: number; use: string; label: string }
+
+export interface LocalRecommendation {
+  chat_model: string;
+  embedding_model: string;
+  reason: string;
+  vram_gb: number;
+  models_dir: string;
+  free_gb: number | null;
+  needed_gb: number;
+  warning: string | null;
+  catalog: LocalModelInfo[];
+}
+
+export interface PullStatus {
+  model: string | null;
+  status: "idle" | "pulling" | "done" | "error";
+  completed: number;
+  total: number;
+  percent: number;
+  error: string | null;
+}
+
+export interface SelfCheckItem {
+  key: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+  fix: string | null;
+  level: "ok" | "info" | "warning" | "error";
+}
+
+export interface MemoryHit {
+  id: number;
+  project_id: string | null;
+  kind: string;
+  content: string;
+  timestamp: string;
+  score?: number;
+}
+
+export interface SnapshotData {
+  project_id: string;
+  project_name?: string;
+  repo_path: string;
+  branch: string;
+  changed_files: string[];
+  last_commit: string;
+  recent_files: string[];
+  open_windows: Array<{ app: string; title: string; related: boolean }>;
+  dev_servers: Array<{ port: number; process?: string; command?: string }>;
+  open_todos: string[];
+  last_chat: string | null;
+  current_task: { id: string; title: string; status: string; progress: string } | null;
+}
+
+export interface Snapshot { id: number; project_id: string; created_at: number; reason: string; data: SnapshotData }
+
+export interface ResumeResult {
+  success: boolean;
+  partial?: boolean;
+  error?: string;
+  steps: Array<{ step: string; status: string; detail: string }>;
+  summary?: { branch: string; last_commit: string; changed_files: number; open_todos: string[]; current_task: SnapshotData["current_task"] };
+}
+
+export interface ProfileModule {
+  name: string;
+  path: string;
+  files: number;
+  test_files: number;
+  todos: number;
+  languages: string[];
+  pct: number;
+  recent_edits: number;
+  basis: string;
+}
+
+export interface ProjectProfile {
+  ok: boolean;
+  project_id: string;
+  name: string;
+  repo_path: string;
+  summary: string;
+  type: { kind: string; label: string; ai: boolean; reasons: string[]; focus: string[] };
+  languages: Array<{ name: string; files: number; percent: number }>;
+  frameworks: string[];
+  databases: string[];
+  package_managers: string[];
+  infrastructure: string[];
+  apps: Array<{ path: string; kind: string; frameworks: string[] }>;
+  run_book: Array<{ path: string; language: string; commands: Record<string, string> }>;
+  ports: number[];
+  env: {
+    variables: Array<{ name: string; set: boolean; has_default?: boolean; declared_in: string | null; used_in: string | null; provider: string | null; kind: string }>;
+    missing: string[];
+    env_file_found: boolean;
+  };
+  modules: ProfileModule[];
+  tests: { files: number; frameworks: string[] };
+  file_count: number;
+  scan_ms: number;
+}
+
+export interface DesktopWindow { hwnd: number; pid: number; exe: string; title: string; app: string }
+
+export type TaskStatus = "planned" | "running" | "waiting_approval" | "waiting_input" | "paused" | "done" | "failed" | "cancelled";
+
+export interface TaskStep {
+  id: number;
+  idx: number;
+  kind: string;
+  title: string;
+  policy: "auto" | "approval" | "input";
+  status: string;
+  detail: string | null;
+  output: Record<string, unknown> | null;
+  started_at: number | null;
+  finished_at: number | null;
+}
+
+export interface NeedItem {
+  id: string;
+  task_id: string | null;
+  project_id: string | null;
+  var: string;
+  kind: string;
+  provider: string | null;
+  title: string;
+  steps: string[];
+  docs_url: string | null;
+  target_file: string | null;
+  status: string;
+  created_at: number;
+}
+
+export interface TaskSummary {
+  id: string;
+  project_id: string | null;
+  title: string;
+  request: string;
+  agent: string;
+  status: TaskStatus;
+  current_step: number;
+  created_at: number;
+  updated_at: number;
+  summary: string | null;
+  steps_total?: number;
+  steps_done?: number;
+}
+
+export interface TaskDetail extends TaskSummary { steps: TaskStep[]; needs: NeedItem[] }
+
+export const getAiStatus = () => apiFetch<AiStatus>("/ai/status");
+export const getLocalRecommendation = () => apiFetch<LocalRecommendation>("/ai/local/recommendation");
+export const getPullStatus = () => apiFetch<PullStatus>("/ai/local/pull");
+export const pullLocalModel = (model: string) =>
+  apiFetch<PullStatus & { success: boolean; error?: string }>("/ai/local/pull", { method: "POST", body: JSON.stringify({ model }) });
+export const selectLocalModel = (chat_model: string) =>
+  apiFetch<{ success: boolean; chat_model: string }>("/ai/local/select", { method: "POST", body: JSON.stringify({ chat_model }) });
+export const installOllama = () =>
+  apiFetch<{ success: boolean; detail?: string; error?: string }>("/ai/local/install-ollama", { method: "POST" });
+export const setOfflineEmbeddings = (enabled: boolean) =>
+  apiFetch<{ success: boolean; error?: string }>("/ai/local/offline-embeddings", { method: "POST", body: JSON.stringify({ enabled }) });
+export const getSelfCheck = () => apiFetch<{ ok: boolean; checks: SelfCheckItem[] }>("/system/self-check");
+
+export const searchMemory = (q: string, projectId?: string) =>
+  apiFetch<{ query: string; results: MemoryHit[]; message: string | null }>(
+    `/memory/search?q=${encodeURIComponent(q)}${projectId ? `&project_id=${encodeURIComponent(projectId)}` : ""}`,
+  );
+export const getMemoryStats = (projectId?: string) =>
+  apiFetch<{ counts: Record<string, number>; path: string }>(`/memory/stats${projectId ? `?project_id=${projectId}` : ""}`);
+
+export const activateProject = (projectId: string) =>
+  apiFetch<{ success: boolean; project_path?: string }>(`/projects/${projectId}/activate`, { method: "POST" });
+export const takeSnapshot = (projectId: string) =>
+  apiFetch<{ success: boolean; data: SnapshotData }>(`/projects/${projectId}/snapshot`, { method: "POST" });
+export const getLatestSnapshot = (projectId: string) =>
+  apiFetch<{ snapshot: Snapshot | null }>(`/projects/${projectId}/snapshot`);
+export const resumeWorkspace = (projectId: string, opts: { open_editor?: boolean; open_terminal?: boolean; start_servers?: boolean } = {}) =>
+  apiFetch<ResumeResult>(`/projects/${projectId}/resume`, { method: "POST", body: JSON.stringify(opts) });
+export const getProjectProfile = (projectId: string, refresh = false) =>
+  apiFetch<ProjectProfile>(`/projects/${projectId}/profile${refresh ? "?refresh=true" : ""}`);
+
+export const getDesktopWindows = () => apiFetch<{ success: boolean; windows: DesktopWindow[]; error?: string }>("/desktop/windows");
+export const getBrowserTabs = () =>
+  apiFetch<{ success: boolean; windows: Array<{ window: DesktopWindow; tabs: Array<{ index: number; title: string; selected: boolean }> }>; error?: string }>("/desktop/tabs");
+export const switchBrowserTab = (title: string) =>
+  apiFetch<{ success: boolean; verified?: boolean; error?: string }>("/desktop/tabs/switch", { method: "POST", body: JSON.stringify({ title }) });
+
+export const createTask = (request: string, agent: string, projectId?: string) =>
+  apiFetch<{ success: boolean; task: TaskDetail }>("/tasks", { method: "POST", body: JSON.stringify({ request, agent, project_id: projectId || null }) });
+export const listTasks = (projectId?: string) =>
+  apiFetch<{ tasks: TaskSummary[] }>(`/tasks${projectId ? `?project_id=${projectId}` : ""}`);
+export const getTask = (taskId: string) => apiFetch<{ task: TaskDetail }>(`/tasks/${taskId}`);
+export const approveTask = (taskId: string) => apiFetch<{ success: boolean }>(`/tasks/${taskId}/approve`, { method: "POST" });
+export const cancelTask = (taskId: string) => apiFetch<{ success: boolean }>(`/tasks/${taskId}/cancel`, { method: "POST" });
+export interface TaskQuestion {
+  id: string;
+  kind: "folder" | "choice" | "text";
+  question: string;
+  help?: string;
+  options?: string[];
+  default?: string;
+  required?: boolean;
+  from_model?: boolean;
+}
+/** Answer a task's questions; an empty object accepts the defaults. */
+export const answerTask = (taskId: string, answers: Record<string, string>) =>
+  apiFetch<{ success: boolean; answers: Record<string, string> }>(`/tasks/${taskId}/answer`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answers }),
+  });
+export const listNeeds = (projectId?: string, refresh = false) =>
+  apiFetch<{ needs: NeedItem[] }>(`/needs?${projectId ? `project_id=${projectId}&` : ""}${refresh ? "refresh=true" : ""}`);
+export const resolveNeed = (needId: string, saveTo: "keyring" | "env_file" | "both" | "done" | "dismiss", value?: string) =>
+  apiFetch<{ success: boolean; saved_to?: string[]; warnings?: string[] }>(`/needs/${needId}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ save_to: saveTo, value: value ?? null }),
+  });
+
+// â”€â”€â”€ WebSocket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export class AgentSocket {
   private ws: WebSocket | null = null;
@@ -614,7 +861,7 @@ export class AgentSocket {
     };
 
     this.ws.onclose = () => {
-      console.info("[AgentSocket] Disconnected — will not auto-reconnect in Phase 0");
+      console.info("[AgentSocket] Disconnected â€” will not auto-reconnect in Phase 0");
     };
 
     this.ws.onerror = (err) => {
@@ -641,3 +888,33 @@ export class AgentSocket {
 }
 
 export const agentSocket = new AgentSocket();
+
+// â”€â”€â”€ Work bar (quick assist) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+export interface NowPlaying {
+  ok: boolean;
+  playing?: boolean;
+  title?: string | null;
+  artist?: string | null;
+  app?: string;
+  status?: string;
+  error?: string;
+}
+export interface AssistReply {
+  handled_by: "assist" | "chat";
+  intent: string;
+  reply: string;
+  success: boolean;
+}
+/** Work bar command: quick actions run locally, anything else goes to chat. */
+export const runAssist = (text: string, projectId?: string) =>
+  apiFetch<AssistReply>("/assist", { method: "POST", body: JSON.stringify({ text, project_id: projectId }) });
+export const getNowPlaying = () => apiFetch<NowPlaying>("/assist/now-playing");
+export const mediaControl = (action: "play_pause" | "next" | "previous" | "volume_up" | "volume_down" | "mute") =>
+  apiFetch<{ success: boolean; message?: string; error?: string; now_playing?: NowPlaying }>("/assist/media", {
+    method: "POST", body: JSON.stringify({ action }),
+  });
+/** OCR the window you're looking at and answer â€” only runs when called. */
+export const readScreen = (question?: string) =>
+  apiFetch<{ success: boolean; answer?: string; error?: string; window?: { title: string; exe: string } }>(
+    "/assist/screen", { method: "POST", body: JSON.stringify({ question: question ?? "" }) });

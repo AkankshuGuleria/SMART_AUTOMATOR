@@ -8,19 +8,16 @@ workspace, and workflow actions through a React desktop UI and a Python API.
 The repository and several runtime labels still use the internal name
 **AUTOMATA**. This documentation uses **autometav01** as the product name.
 
-## MVP capabilities
+## Capabilities
 
-- Project registration and activity capture for file edits, git commits,
-  terminal history, sessions, and TODOs.
-- Memory search and grounded chat backed by CockroachDB and configurable
-  reasoning/embedding providers.
-- Daily briefs, activity summaries, project analytics, and diagnostics.
-- Workspace restore and development-server controls for Windows.
-- Agent actions for repository explanation, code location, work continuation,
-  and commit-message generation.
-- Approval-aware commands, cross-app actions, visual/OCR tools, and
-  checkpointed workflows.
-- Autonomous commit/session triggers with decision provenance.
+- Always-on tray app (autostart, single instance, backend supervisor, Alt+Space / Ctrl+Alt+A AI work bar).
+- Local offline memory (SQLite FTS5) synced from CockroachDB; session snapshots and resume.
+- Project profiles detected from each project's files (stack, run book, env vars, modules).
+- Chat with memory-grounded answers; cloud models online, Ollama offline.
+- Delegation tasks to Antigravity / Claude / VS Code / ChatGPT with approval gates.
+- "Needs from you" inbox for keys and connection strings (Credential Manager / .env).
+- Verified desktop control: focus, type, paste, browser tabs, OCR read-back.
+- System resources and app-usage analytics; briefs, restore, analytics, workflows.
 
 ## Run locally
 
@@ -61,7 +58,10 @@ available at `http://localhost:5173`.
 | [User guide](docs/USER_GUIDE.md) | `docs/USER_GUIDE.md` | First-run and feature workflows |
 | [Security](docs/SECURITY.md) | `docs/SECURITY.md` | Data handling, action approvals, and deployment limits |
 | [QA checklist](docs/QA_CHECKLIST.md) | `docs/QA_CHECKLIST.md` | Verification gates before calling the MVP ready |
+| [Start here (agents & contributors)](docs/AGENTS.md) | `docs/AGENTS.md` | Product summary, repo map, run/test, rules |
 | [Project status](docs/PROJECT_STATUS.md) | `docs/PROJECT_STATUS.md` | Feature checklist, verification results, remaining work |
+| [Audit report](docs/AUDIT_REPORT.md) | `docs/AUDIT_REPORT.md` | 2026-10-26 audit against the problem statement, test results, findings |
+| [Smart workspace plan](docs/SMART_WORKSPACE_PLAN.md) | `docs/SMART_WORKSPACE_PLAN.md` | Live test findings, missing features, stack and phased update plan |
 | [Conventions](docs/CONVENTIONS.md) | `docs/CONVENTIONS.md` | Module boundaries and file placement |
 | [Technology stack](docs/TECH_STACK.md) | `docs/TECH_STACK.md` | Exact versions and tooling decisions |
 | [Engineering playbooks](docs/SKILLS.md) | `docs/SKILLS.md` | Testing, bug-fixing, frontend, backend, prompts, output |

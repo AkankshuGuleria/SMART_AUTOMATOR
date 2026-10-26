@@ -26,7 +26,7 @@ class Settings:
     aws_access_key_id: str = field(default="")
     aws_secret_access_key: str = field(default="")
     ollama_base_url: str = field(default="http://localhost:11434")
-    ollama_model: str = field(default="qwen2.5:7b")
+    ollama_model: str = field(default="qwen2.5-coder:3b")
     ollama_embedding_model: str = field(default="nomic-embed-text")
     embedding_model_id: str = field(default="")
     embedding_dimension: int = field(default=0)
@@ -93,6 +93,8 @@ def _load_settings() -> Settings:
         cohere_api_key=os.getenv("COHERE_API_KEY", ""),
         api_key=os.getenv("API_KEY", ""),
         ollama_embedding_model=os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text"),
+        ollama_base_url=(os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434").rstrip("/"),
+        ollama_model=os.getenv("OLLAMA_MODEL") or "qwen2.5-coder:3b",
     )
 
     logger.info(
@@ -112,3 +114,20 @@ def _load_settings() -> Settings:
 
 
 settings: Settings = _load_settings()
+
+
+def data_dir() -> str:
+    """Local, per-user data folder (memory, usage, logs). Created on first use.
+
+    %LOCALAPPDATA%/AUTOMATA on Windows, ~/.automata elsewhere; override with
+    AUTOMATA_DATA_DIR (tests point this at a temp folder).
+    """
+    override = os.environ.get("AUTOMATA_DATA_DIR")
+    if override:
+        path = override
+    elif os.name == "nt":
+        path = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "AUTOMATA")
+    else:
+        path = os.path.join(os.path.expanduser("~"), ".automata")
+    os.makedirs(path, exist_ok=True)
+    return path

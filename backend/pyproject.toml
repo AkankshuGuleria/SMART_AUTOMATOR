@@ -29,9 +29,14 @@ dependencies = [
     "tiktoken>=0.9.0",
     "psutil>=6.0.0",
     "nvidia-ml-py>=12.535.0",
+    "comtypes>=1.4.0",
 ]
 
 [project.optional-dependencies]
+# Offline semantic search without Ollama (~60 MB package + 130 MB model on first use).
+local-ai = [
+    "fastembed>=0.4.0",
+]
 dev = [
     # ── SKILLS.md §1 Testing ──────────────────────────────────────────────────
     "pytest>=8.0.0",
@@ -83,7 +88,7 @@ ignore = [
 "ai/bedrock_client.py" = ["S310"]  # intentional HTTP API calls to LLM services
 "automation/os_windows.py" = ["S603", "S607"]  # intentional subprocess calls for OS automation
 "memory/retrieval.py" = ["S608"]  # validated SQL construction
-"api/server.py" = ["B008"]  # FastAPI Body() defaults are the documented idiom
+"api/*.py" = ["B008"]  # FastAPI Body() defaults are the documented idiom
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
