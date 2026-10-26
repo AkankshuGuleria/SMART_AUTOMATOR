@@ -2,6 +2,7 @@
  * components/WhereYouLeftOff.tsx — latest session snapshot + one-click resume.
  */
 import { useState } from 'react'
+import { withPermission } from '../lib/permissions'
 import { History, GitBranch, FileCode, Play, Loader2, Save, CheckCircle2, XCircle, MinusCircle, Server, ListChecks } from 'lucide-react'
 import GlassCard from './ui/GlassCard'
 import { usePolling } from '../lib/usePolling'
@@ -39,7 +40,11 @@ export default function WhereYouLeftOff({ projectId, onOpenTasks }: { projectId?
   }
   const resume = async () => {
     setBusy('resume'); setError(null); setResult(null)
-    try { setResult(await resumeWorkspace(projectId)) } catch (e) {
+    try {
+      const r = await withPermission(pid => resumeWorkspace(projectId, {}, pid))
+      if (r.denied) setError('Cancelled — nothing was opened.')
+      else setResult(r)
+    } catch (e) {
       setError(e instanceof Error ? e.message : 'Resume failed')
     } finally { setBusy(null) }
   }

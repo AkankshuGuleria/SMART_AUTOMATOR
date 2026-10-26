@@ -27,3 +27,7 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-notification = "2"
+
+[target.'cfg(windows)'.dependencies]
+# Same version Tauri uses: lets the work bar move keyboard focus into its web content.
+webview2-com = "0.39"

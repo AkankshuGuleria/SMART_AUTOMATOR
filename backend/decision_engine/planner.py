@@ -97,8 +97,15 @@ def plan(trigger: str, context: dict[str, Any]) -> dict[str, Any]:
     # Log the plan for provenance
     _log_plan(trigger, actions)
 
+    from security.permissions import ACTION_CATEGORY, CATEGORIES, effective_policy
+
     for action in actions:
-        policy = action.get("policy", "suggest")
+        # Actions that control the PC ask first unless the user always allows them.
+        policy = effective_policy(action.get("type", ""), action.get("policy", "suggest"))
+        action["policy"] = policy
+        if action.get("type") in ACTION_CATEGORY:
+            action["permission"] = CATEGORIES[ACTION_CATEGORY[action["type"]]]["label"]
+            action["permission_category"] = ACTION_CATEGORY[action["type"]]
         action.setdefault("executed", False)
         action.setdefault("executed_at", None)
         action.setdefault("result", None)
@@ -1449,9 +1456,15 @@ def _build_reply(trigger: str, actions: list[dict[str, Any]], context: dict[str,
                 task = result.get("task", {})
                 clarify = next((s for s in task.get("steps", []) if s.get("kind") == "clarify"), {})
                 questions = (clarify.get("output") or {}).get("questions", [])
+                from tasks.engine import AGENT_LABELS
+
+                agent = AGENT_LABELS.get(task.get("agent", ""), task.get("agent", "the AI app"))
                 lines.append(
-                    f"Created task **{task.get('title', '')}** for {task.get('agent', 'the AI app')}. "
+                    f"Created task **{task.get('title', '')}** for {agent}. "
                     + ("Before I hand it over, open Tasks and answer:" if questions else
+                       "Before I hand it over, I have a few questions (where to work, features, design) — "
+                       "answer them in Tasks. Nothing is sent until you approve the hand-off."
+                       if clarify else
                        "Open Tasks to review the plan — the hand-off step waits for your approval.")
                 )
                 lines.extend(f"- {q['question']}" + (f" (default: {q['default']})" if q.get("default") else "")

@@ -1,38 +1,31 @@
-# AUTOMATA — Start Here (All Agents)
+# AUTOMATA — start here (all agents)
 
-## Project identity
-AUTOMATA is an autonomous developer agent using **CockroachDB** (persistent memory + vector indexing + Managed MCP Server) and **Amazon Bedrock** (reasoning). It is a hackathon submission with a hard deadline.
+AUTOMATA is a local-first **AI development workspace for Windows**: a Tauri tray
+app supervising a Python agent that remembers each project, understands its
+stack, hands tasks to AI apps (Antigravity, Kilo Code, Claude, Cursor, VS Code)
+with approval gates, and asks before it controls the PC.
 
-## Read these docs BEFORE touching any code (in order)
-1. `PROJECT.md` — what it is, why it exists, demo story
-2. `ARCHITECTURE.md` — components, data flow, module map
-3. `DATABASE_SCHEMA.md` — all CockroachDB tables
-4. `CONVENTIONS.md` — folder structure, naming, module boundaries
-5. `TECH_STACK.md` — exact versions and tooling decisions
-6. `ROADMAP.md` → Current Phase — what is in scope RIGHT NOW
-
-## Current phase
-**Phase 0 - In Progress** (`TASK.md` TASK-002 is partially complete; TASK-005+ remain blocked until CockroachDB is provisioned)
+**Read `docs/AGENTS.md` first** — repository map, run/test commands, rules and
+where to start for common changes. Feature status: `docs/PROJECT_STATUS.md`.
 
 ## Non-negotiable rules
-- Never write real credentials into any file. Use placeholder names only.
-- Never write to CockroachDB from outside `backend/db/client.py`.
-- Never call Bedrock from outside `backend/ai/bedrock_client.py`.
-- Never execute OS actions from outside `backend/automation/`.
-- Every schema change → update `DATABASE_SCHEMA.md` in the same change.
-- Every architecture change → update `ARCHITECTURE.md` in the same change.
-- Check `ROADMAP.md` current phase — don't build Phase 3 features during Phase 1.
 
-## Dev commands
+- Never write real credentials anywhere. Secrets live in `backend/.env`
+  (git-ignored) or Windows Credential Manager.
+- Module boundaries: model calls only in `backend/ai/bedrock_client.py`; cloud DB
+  only via `backend/db/client.py`; local memory only via
+  `backend/memory/local_store.py`; desktop effects only via
+  `backend/automation/desktop.py` / `chat_apps.py`.
+- Anything that controls the PC goes through `security/permissions.check()`
+  (or a chat approval card). Never trust a caller-supplied "approved" flag.
+- Never report an action as done without verifying it (window in front, text
+  read back, file exists).
+- Every endpoint / schema / architecture change updates its doc in the same change.
+
+## Commands
+
 ```powershell
-# Backend
-cd backend
-$env:Path = "C:\Users\hp\.local\bin;$env:Path"
-uv run python main.py              # start FastAPI at http://127.0.0.1:8000
-uv run pytest tests/ -v            # run tests
-
-# Frontend
-cd frontend
-npm run dev                        # Vite dev server at http://localhost:5173
-npm run build                      # type-check + production build
+.\scripts\dev.ps1                      # agent + browser UI   (-Desktop for the app)
+cd backend;  uv run pytest tests/ -q   # must stay green
+cd frontend; npx tsc -b; npx oxlint src; npm test
 ```

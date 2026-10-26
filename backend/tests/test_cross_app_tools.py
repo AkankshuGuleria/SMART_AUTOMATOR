@@ -8,8 +8,9 @@ submit_prompt_to_app, verify_result.
 No live OS calls are made — tool dispatch is tested via execute_tool.
 """
 
-from decision_engine.tools import execute_tool, get_tool, get_tool_descriptions
 from unittest.mock import patch
+
+from decision_engine.tools import execute_tool, get_tool, get_tool_descriptions
 
 
 def test_copy_to_clipboard_tool_registered() -> None:

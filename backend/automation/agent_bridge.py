@@ -6,7 +6,7 @@ Owns:    Detecting external AI/coding tools (Claude, Cursor, Antigravity) and
 Never:   Invents CLI flags, or pastes into an IDE window where the text would
          land in an open file instead of the agent panel. When no verified
          path exists it says so and leaves the prompt on the clipboard.
-Ref:     docs/SMART_WORKSPACE_PLAN.md (Phase 0 / Phase 4).
+Ref:     docs/ARCHITECTURE.md §3.6 (desktop control, agent hand-off).
 """
 
 from __future__ import annotations
@@ -89,6 +89,13 @@ def _detect(tool: str) -> ToolStatus:
         status.app_path = status.cli_path or _first_existing(_local("Programs", "Antigravity", "Antigravity.exe"))
         if chat_apps.installed("antigravity") or chat_apps.installed("antigravity_app"):
             status.prompt_via = "app_chat"
+    elif tool == "kilo":
+        # Kilo Code is a VS Code-style extension; here it runs inside Antigravity IDE.
+        status.app_path = _first_existing(_local("Programs", "Antigravity IDE", "Antigravity IDE.exe"))
+        if chat_apps.installed("kilo"):
+            status.prompt_via = "app_chat"
+        elif status.app_path:
+            status.error = "Kilo Code is not installed in Antigravity IDE (Extensions → search 'Kilo Code')."
     elif tool == "vscode":
         status.cli_path = shutil.which("code") or _first_existing(
             _local("Programs", "Microsoft VS Code", "bin", "code.cmd")

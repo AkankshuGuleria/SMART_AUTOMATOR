@@ -182,6 +182,9 @@ def launch_browser(url: str) -> bool:
 _EXECUTABLE_MAP: dict[str, str] = {
     "code": "code",
     "vscode": "code",
+    "antigravity-ide": "antigravity-ide",
+    "antigravity": "antigravity-ide",
+    "cursor": "cursor",
     "notepad": "notepad",
     "notepad++": "notepad++",
     "calc": "calc",
@@ -205,6 +208,39 @@ _EXECUTABLE_MAP: dict[str, str] = {
 }
 
 
+def _programs(*parts: str) -> str:
+    return os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", *parts)
+
+
+# Real GUI executables for apps whose PATH entry is a .cmd launcher (starting the
+# .cmd opens a console window) or that are not on PATH at all.
+KNOWN_APP_EXES: dict[str, list[str]] = {
+    "code": [_programs("Microsoft VS Code", "Code.exe"), r"C:\Program Files\Microsoft VS Code\Code.exe"],
+    "antigravity-ide": [_programs("Antigravity IDE", "Antigravity IDE.exe")],
+    "antigravity": [_programs("Antigravity", "Antigravity.exe")],
+    "cursor": [_programs("cursor", "Cursor.exe")],
+    "claude": [os.path.join(os.environ.get("LOCALAPPDATA", ""), "AnthropicClaude", "claude.exe"),
+               _programs("Claude", "Claude.exe")],
+}
+
+
+def resolve_executable(name: str) -> str | None:
+    """Full path of the app to start: known install paths first, then PATH."""
+    import shutil
+
+    for path in KNOWN_APP_EXES.get(name.lower(), []):
+        if path and os.path.exists(path):
+            return path
+    return shutil.which(name)
+
+
+def _start_detached(path: str) -> None:
+    """Start an app without a console window (a .cmd launcher's console stays hidden)."""
+    subprocess.Popen([path], creationflags=0x08000000 | 0x00000200,  # NO_WINDOW | NEW_PROCESS_GROUP
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     close_fds=True)
+
+
 def launch_app(app_name: str) -> bool:
     """
     Launch a named desktop application by executable name or common alias.
@@ -213,6 +249,21 @@ def launch_app(app_name: str) -> bool:
     as an executable. Falls back gracefully and logs the failure.
     """
     exe = _EXECUTABLE_MAP.get(app_name.lower().strip(), app_name.strip())
+    if not exe.startswith(("ms-", "http://", "https://")) and not re.search(r"\s|,|&|\|", exe):
+        path = resolve_executable(exe)
+        if path:
+            try:
+                _start_detached(path)
+                logger.info("os_windows.launch_app: started | app=%s path=%s", app_name, path)
+                return True
+            except OSError as exc:
+                logger.warning("os_windows.launch_app: direct start failed | %s — %s", path, exc)
+        try:
+            os.startfile(exe)  # type: ignore[attr-defined]  # App Paths, Store app aliases
+            logger.info("os_windows.launch_app: shell start | app=%s", exe)
+            return True
+        except OSError:
+            pass  # fall through to the PowerShell path below
     # Handle special protocol URLs (ms-settings: etc.)
     if exe.startswith(("ms-", "http://", "https://")):
         try:

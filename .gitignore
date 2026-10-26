@@ -1,40 +1,10 @@
 # .gitignore — AUTOMATA
+# Note: git does not support comments at the end of a pattern line.
 
-# ─── Python / Backend ─────────────────────────────────────────────────────────
+# ─── Secrets (never commit) ───────────────────────────────────────────────────
 .env
-.env.local
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-.venv/
-venv/
-env/
-.Python
-*.egg-info/
-dist/
-build/
-*.egg
-
-# uv — lock file IS committed (reproducible installs); cache is not
-.uv_cache/
-.tools/
-/uv.exe
-/uvx.exe
-/uvw.exe
-
-# ─── Frontend / Node ──────────────────────────────────────────────────────────
-node_modules/
-frontend/dist/
-frontend/build/
-frontend/.vite/
-*.local
-
-# ─── Tauri / Rust ─────────────────────────────────────────────────────────────
-frontend/src-tauri/target/
-Cargo.lock        # Tauri lock — keep if it's the primary Cargo.lock
-
-# ─── Secrets (critical — never commit) ───────────────────────────────────────
+.env.*
+!.env.example
 *.pem
 *.key
 *.cert
@@ -42,33 +12,66 @@ Cargo.lock        # Tauri lock — keep if it's the primary Cargo.lock
 credentials.json
 serviceAccount*.json
 
-# ─── OS artifacts ─────────────────────────────────────────────────────────────
-.DS_Store
-Thumbs.db
-desktop.ini
+# ─── Python / backend ─────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.Python
+.uv_cache/
+.tools/
+/uv.exe
+/uvx.exe
+/uvw.exe
+backend/tmp/
 
-# ─── Editor artifacts ─────────────────────────────────────────────────────────
-.vscode/settings.json
-.idea/
-*.swp
-*.swo
+# ─── Node / frontend ──────────────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/build/
+.vite/
+*.local
 
-# ─── Test / Coverage ──────────────────────────────────────────────────────────
+# ─── Tauri / Rust ─────────────────────────────────────────────────────────────
+# Cargo.lock is committed (reproducible desktop builds); build output is not.
+frontend/src-tauri/target/
+
+# ─── Generic build output ─────────────────────────────────────────────────────
+dist/
+build/
+
+# ─── Tests, linters, coverage ─────────────────────────────────────────────────
 .pytest_cache/
-.coverage
-htmlcov/
+.ruff_cache/
 .mypy_cache/
+.coverage
+coverage/
+htmlcov/
 
 # ─── Logs ─────────────────────────────────────────────────────────────────────
 *.log
 logs/
 
-# ─── Demo / Scratch ───────────────────────────────────────────────────────────
-# demo/ folder itself is tracked (for assets); individual recordings may be large
+# ─── OS and editors ───────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# ─── AI coding assistants ─────────────────────────────────────────────────────
+# Shared project rules are committed; local caches, worktrees and plans are not.
+.cursor/
+.claude/*
+!.claude/rules/
+.kilo/*
+!.kilo/rules/
+
+# ─── Demo recordings (large) ──────────────────────────────────────────────────
 demo/*.mp4
 demo/*.mov
 demo/*.webm
-.vite/
-.cursor/
-.kilo/
-.claude/

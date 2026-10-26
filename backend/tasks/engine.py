@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 WATCH_MAX_S = 20 * 60
 WATCH_QUIET_S = 90
 WATCH_POLL_S = 5
-AGENT_LABELS = {"antigravity": "Antigravity", "claude": "Claude", "cursor": "Cursor",
+AGENT_LABELS = {"antigravity": "Antigravity", "kilo": "Kilo Code", "claude": "Claude", "cursor": "Cursor",
                 "vscode": "VS Code", "chatgpt": "ChatGPT"}
 CHAT_ONLY = {"chatgpt"}  # agents that cannot edit files in the project folder
 
@@ -58,15 +58,19 @@ def _broadcast(task_id: str) -> None:
 # "using antigravity", "with claude code", "in vs code" … — only agent names, so
 # "add login with google" keeps its meaning.
 _AGENT_PHRASE = re.compile(
-    r"\b(?:using|use|with|in|via|through|on)\s+(?:antigravity(?:\s+ide)?|claude(?:\s+code)?|cursor|"
-    r"vs\s*code|vscode|visual\s+studio\s+code|chatgpt)\b",
+    r"\b(?:using|use|with|in|via|through|on|open|launch|start)\s+(?:the\s+)?"
+    r"(?:kilo(?:\s*code)?|antigravity(?:\s+ide)?|claude(?:\s+code)?|cursor|vs\s*code|vscode|"
+    r"visual\s+studio\s+code|chatgpt)(?:\s+ai)?(?:\s+agent)?\b",
     re.I,
 )
+_LEADING_JOINERS = re.compile(r"^(?:\s*(?:and|then|to|,)\b)+\s*", re.I)
 
 
 def clean_request(request: str) -> str:
-    """The request without the 'using <agent>' part (the agent doesn't need it)."""
-    text = re.sub(r"\s+", " ", _AGENT_PHRASE.sub("", request)).strip(" ,.")
+    """The request without the 'open/using <agent>' parts (the agent doesn't need them)."""
+    text = re.sub(r"\s+", " ", _AGENT_PHRASE.sub(" ", request))
+    text = re.sub(r"\s+(?:and\s+)+(?=to\b)", " ", text)  # "… and  to make" → "… to make"
+    text = _LEADING_JOINERS.sub("", text).strip(" ,.")
     return text or request.strip()
 
 
@@ -447,6 +451,7 @@ def step_watch(task: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
     changed: set[str] = set()
     last_change = None
     cancel = _cancel.get(task["id"])
+    waited_for_agent = False
     while time.monotonic() < deadline:
         if cancel and cancel.is_set():
             return {"ok": False, "error": "Cancelled"}
@@ -456,13 +461,33 @@ def step_watch(task: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
             changed |= newly
             last_change = time.monotonic()
         if last_change and time.monotonic() - last_change >= quiet:
+            # Agents pause to think between edits: a quiet folder is not "done"
+            # while the agent says it is still working.
+            if _agent_busy(task, repo):
+                waited_for_agent = True
+                time.sleep(poll)
+                continue
             break
         time.sleep(poll)
     rel = sorted(os.path.relpath(p, repo) for p in changed)
     if not rel:
         return {"ok": True, "changed_files": [], "continue": True,
                 "message": "No file changes seen yet — the agent may still be working or waiting for you."}
-    return {"ok": True, "changed_files": rel[:200], "message": f"{len(rel)} files changed"}
+    still = _agent_busy(task, repo)
+    note = " (the agent is still working — check it before building)" if still else (
+        " after the agent finished" if waited_for_agent else "")
+    return {"ok": True, "changed_files": rel[:200], "agent_busy": bool(still),
+            "message": f"{len(rel)} files changed{note}"}
+
+
+def _agent_busy(task: dict[str, Any], repo: str | None) -> bool:
+    """True only when the agent's app clearly shows it is still working."""
+    try:
+        from automation.chat_apps import agent_busy
+
+        return agent_busy(task.get("agent", ""), repo) is True
+    except Exception:
+        return False
 
 
 def step_verify(task: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:

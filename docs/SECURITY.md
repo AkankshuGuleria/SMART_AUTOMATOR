@@ -2,9 +2,27 @@
 
 ## Scope
 
-The current application is a local, single-user MVP. The backend is intended
-to bind to loopback and is not documented as a hardened or authenticated
-public service. Do not expose it to an untrusted network.
+The current application is a local, single-user desktop app. The backend binds
+to `127.0.0.1` and is not an authenticated public service. Do not expose it to
+an untrusted network. Latest audit, findings and how to re-run every scanner:
+[SECURITY_AUDIT.md](SECURITY_AUDIT.md).
+
+## Permissions (ask before controlling the PC)
+
+`security/permissions.py`. Every action that controls the PC asks first:
+control other apps (focus, type, paste, keys, tabs, clipboard), music and volume,
+open apps and websites, read the screen, reopen the workspace, run commands.
+The answer is *Allow once*, *Always allow* (per category, Settings → Permissions)
+or *Deny*. Approvals are issued by the server, single-use, bound to the exact
+action text, and expire after 5 minutes; a caller-supplied `approved` flag is
+never consent. Chat actions in these categories show an approval card.
+
+## Local API guard
+
+`security/http_guard.py` runs before every request: unknown `Host` headers
+(DNS rebinding), browser requests from any origin other than the AUTOMATA UI,
+cross-site fetch metadata, foreign WebSocket origins and bodies over 10 MB are
+refused with 403/413. CORS allows only the UI origins, no credentials.
 
 ## Sensitive data
 

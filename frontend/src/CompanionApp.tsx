@@ -1,5 +1,5 @@
 /**
- * CompanionApp.tsx — the AI work bar (Alt+Space or Ctrl+Alt+A, like a game bar).
+ * CompanionApp.tsx — the AI work bar (Alt+Space, changeable in Settings, like a game bar).
  *
  * One box for everything: ask about the project, give commands ("play lofi on
  * spotify", "search tauri tray on github", "using antigravity add a contact
@@ -16,9 +16,14 @@ import {
   type NowPlaying,
 } from './lib/api'
 import { hideCurrentWindow, openMainScreen, showMainWindow } from './lib/desktop'
+import { withPermission, askPermission, setPermission } from './lib/permissions'
+import { approveAction } from './lib/api'
+import PermissionHost from './components/PermissionHost'
 import { usePolling } from './lib/usePolling'
 
 const ACTIVE_PROJECT_KEY = 'automata.activeProjectId'
+
+interface PendingAction { type: string; params?: Record<string, unknown>; permission?: string; permission_category?: string; provenance?: string }
 
 function activeProject(): string | undefined {
   try { return localStorage.getItem(ACTIVE_PROJECT_KEY) ?? undefined } catch { return undefined }
@@ -59,20 +64,39 @@ export default function CompanionApp() {
     setBusy(label); setReply(null)
     try { setReply(await fn()) } catch (e) {
       setReply({ ok: false, text: e instanceof TypeError ? 'AUTOMATA agent is not running.' : (e instanceof Error ? e.message : 'Failed') })
-    } finally { setBusy(null) }
+    } finally {
+      setBusy(null)
+      // After a permission prompt (or any command) the cursor goes back to the box.
+      setTimeout(() => inputRef.current?.focus(), 0)
+    }
   }
 
   const send = (text = input.trim()) => {
     if (!text) return
     setInput('')
     run('send', async () => {
-      const res = await runAssist(text, activeProject())
-      return { ok: res.success, text: res.reply || 'Done.' }
+      const res = await withPermission(pid => runAssist(text, activeProject(), pid))
+      if (res.denied) return { ok: false, text: 'Cancelled — nothing was done.' }
+      // Chat actions that control the PC (open an app, type, …) wait for approval too.
+      const lines = [res.reply || 'Done.']
+      for (const a of (res as { pending_actions?: PendingAction[] }).pending_actions ?? []) {
+        const decision = await askPermission({
+          id: '', category: a.permission_category ?? '', label: a.permission ?? 'Control your PC',
+          help: a.provenance ?? '', action: a.provenance ?? a.type,
+        })
+        if (decision === 'deny') { lines.push('Cancelled — nothing was done.'); continue }
+        if (decision === 'always' && a.permission_category) await setPermission(a.permission_category, 'allow')
+        const r = await approveAction(a.type, a.params ?? {}, activeProject())
+        const out = r.result as { message?: string; error?: string } | undefined
+        lines.push(out?.message ?? out?.error ?? (r.executed ? 'Done.' : 'It did not work.'))
+      }
+      return { ok: res.success, text: lines.join('\n') }
     })
   }
 
   const media = (action: Parameters<typeof mediaControl>[0]) => run('media', async () => {
-    const r = await mediaControl(action)
+    const r = await withPermission(pid => mediaControl(action, pid))
+    if (r.denied) return { ok: false, text: 'Cancelled — nothing was done.' }
     if (r.now_playing) setMusic(r.now_playing)
     else setMusic(await getNowPlaying())
     return { ok: r.success, text: r.message ?? r.error ?? '' }
@@ -83,6 +107,7 @@ export default function CompanionApp() {
 
   return (
     <div style={shell}>
+      <PermissionHost compact />
       <div style={panel}>
         {/* header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -157,7 +182,8 @@ export default function CompanionApp() {
           <button
             onClick={() => run('screen', async () => {
               const q = input.trim(); setInput('')
-              const r = await readScreen(q || undefined)
+              const r = await withPermission(pid => readScreen(q || undefined, pid))
+              if (r.denied) return { ok: false, text: 'Cancelled — nothing was read.' }
               return r.success ? { ok: true, text: `${r.answer}\n\n— read from: ${r.window?.title ?? 'window'}` } : { ok: false, text: r.error ?? 'Could not read the screen.' }
             })}
             disabled={!!busy}
@@ -174,7 +200,8 @@ export default function CompanionApp() {
             <div style={tileLabel}>Quick</div>
             <button disabled={!input.trim() || !!busy} onClick={() => send(`search ${input.trim()}`)} style={quickBtn}><Search size={12} /> Search the web</button>
             <button disabled={!pid || !!busy} onClick={() => run('resume', async () => {
-              const r = await resumeWorkspace(pid!)
+              const r = await withPermission(permissionId => resumeWorkspace(pid!, {}, permissionId))
+              if (r.denied) return { ok: false, text: 'Cancelled — nothing was opened.' }
               return { ok: !r.error, text: r.error ?? r.steps.map(s => `${s.status === 'ok' ? '✓' : s.status === 'skipped' ? '–' : '✗'} ${s.step}: ${s.detail}`).join('\n') }
             })} style={quickBtn}><History size={12} /> Resume work</button>
             <button disabled={!pid || !!busy} onClick={() => run('save', async () => { await takeSnapshot(pid!); return { ok: true, text: 'Saved where you left off.' } })} style={quickBtn}><Save size={12} /> Save state</button>

@@ -1,27 +1,25 @@
-# Secrets & Security Skill — AUTOMATA (SKILLS.md §8)
+# Secrets & security skill — AUTOMATA
 
-## Core rule
-CockroachDB stores ONLY `credential_refs` labels — NEVER secret values.
-Real secrets → `backend/.env` (gitignored) or OS Credential Manager via `keyring`.
+Full guide: `docs/SECURITY.md`; latest audit and how to re-run the scanners:
+`docs/SECURITY_AUDIT.md`.
 
-## Where each thing lives
-| Secret type | Correct location | NEVER here |
+## Where secrets live
+| Secret | Correct location | Never |
 |---|---|---|
-| DB connection string | `backend/.env` → `COCKROACHDB_CONNECTION_STRING` | Code files, docs, DB rows |
-| AWS keys | `backend/.env` → `AWS_ACCESS_KEY_ID` / `SECRET` | Code, committed files |
-| Credential label/ref | `credential_refs` CockroachDB table | Secret value — label ONLY |
-| Runtime secret resolution | `keyring` Python lib → Windows Credential Manager | Logs, DB, Bedrock prompts |
+| Provider keys, DB connection string | `backend/.env` (git-ignored) | Code, docs, DB rows, logs, prompts |
+| Values entered in the Needs inbox | Windows Credential Manager (`keyring`) and/or the project's `.env` | AUTOMATA's own databases |
+| Credential label | `credential_refs` table | The value itself |
 
-## Redaction before writes
-Call `memory.capture.redact_secrets(text)` before writing to CockroachDB or sending to Bedrock.
-Patterns: `ghp_`, `AKIA`, `sk-`, `key=`, `token=`, `password=`, `Bearer `
+## Rules
+- Redact with `memory.capture.redact_secrets(text)` before storing text or sending it to a model.
+- Controlling the PC asks first: `security/permissions.check(category, action, permission_id)`.
+  Approvals are server-issued and single-use; never accept a caller's "approved" flag.
+- The API serves only this PC and the AUTOMATA UI (`security/http_guard.py`) — keep it that way.
+- No `pickle`, `eval` or `shell=True` on stored/remote data; validate ids used in file paths.
+- `.env` writes refuse line breaks (variable injection) — keep `tasks/needs._write_env` strict.
 
-## Setup
+## Before committing
 ```powershell
-Copy-Item backend/.env.example backend/.env   # then fill in real values
-# .env is gitignored — confirm before any git commit
+cd backend; uv run ruff check .   # S rules on; reviewed ignores in pyproject.toml
+git check-ignore backend/.env   # must print the path
 ```
-
-## Failure modes to avoid
-- "Just for the demo" key in a config file — it gets forgotten and shipped
-- Logging Bedrock payloads without checking for secrets first

@@ -54,11 +54,25 @@ def collect_needs(project_id: str | None, task_id: str | None = None,
     return store.list_needs(project_id=project_id) if project_id else store.list_needs(task_id=task_id)
 
 
+_VAR_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+
+
 def _write_env(path: str, var: str, value: str) -> None:
-    """Set VAR=value in a .env file (replacing an existing line); make sure git ignores it."""
+    """Set VAR=value in a .env file (replacing an existing line); make sure git ignores it.
+
+    Refuses anything that could change more than that one line: a value with a
+    line break would otherwise smuggle extra variables (e.g. NODE_OPTIONS) into
+    the project's environment.
+    """
+    if not _VAR_NAME.match(var):
+        raise ValueError(f"'{var}' is not a valid environment variable name")
+    if any(ch in value for ch in "\r\n\x00") or any(ord(ch) < 32 and ch != "\t" for ch in value):
+        raise ValueError("The value contains a line break or control character; paste it on one line.")
     env = Path(path)
+    if not env.name.startswith(".env"):
+        raise ValueError(f"Refusing to write secrets to {env.name}: only .env files are allowed")
     lines = env.read_text(encoding="utf-8").splitlines() if env.exists() else []
-    safe = value if re.fullmatch(r"[^\s'\"#]+", value) else '"' + value.replace('"', '\\"') + '"'
+    safe = value if re.fullmatch(r"[^\s'\"#\\]+", value) else '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
     pattern = re.compile(rf"^\s*(export\s+)?{re.escape(var)}\s*=")
     for i, line in enumerate(lines):
         if pattern.match(line):
@@ -126,6 +140,8 @@ def resolve(need_id: str, value: str | None, save_to: str) -> dict[str, Any]:
         try:
             _write_env(target, need["var"], value)
             saved.append(target)
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
         except OSError as exc:
             return {"success": False, "error": f"Could not write {target}: {exc}"}
     store.resolve_need(need_id, save_to)

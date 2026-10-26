@@ -75,7 +75,7 @@ class TestExecuteTool:
             target = os.path.join(tmp, "newdir", "file.txt")
             result = execute_tool("write_file", {"path": target, "content": "data"})
             assert result["success"] is True
-            with open(target, "r") as f:
+            with open(target) as f:
                 assert f.read() == "data"
 
     def test_apply_diff_patches_file(self):
@@ -87,7 +87,7 @@ class TestExecuteTool:
             diff = "@@ -1,2 +1,2 @@\n line1\n-line2\n+line2 modified\n"
             result = execute_tool("apply_diff", {"path": path, "diff": diff})
             assert result["success"] is True
-            with open(path, "r") as f:
+            with open(path) as f:
                 content = f.read()
             assert "line2 modified" in content
         finally:

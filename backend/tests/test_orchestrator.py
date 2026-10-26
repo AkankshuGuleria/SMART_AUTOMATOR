@@ -4,7 +4,6 @@ tests/test_orchestrator.py — AUTOMATA orchestrator loop tests.
 
 from unittest.mock import patch
 
-
 from decision_engine.orchestrator import (
     MAX_ITERATIONS,
     _extract_json,
@@ -151,7 +150,7 @@ class TestRunOrchestrator:
              ]), \
              patch("decision_engine.orchestrator._call_reflector", return_value='{"action": "stop", "success": false}'), \
              patch("decision_engine.orchestrator.execute_tool", return_value={"success": False, "error": "boom"}), \
-             patch("decision_engine.orchestrator._record_decision", return_value="dec-1") as mock_dec, \
+             patch("decision_engine.orchestrator._record_decision", return_value="dec-1"), \
              patch("decision_engine.orchestrator._record_mistake", return_value="mist-1") as mock_mist:
             result = run_orchestrator("test goal", project_id="p1")
             assert result.success is False

@@ -1,23 +1,36 @@
 """workflow_engine/checkpoint_store.py — AUTOMATA Workflow Engine: checkpoint persistence.
 
 Owns:    Persisting and restoring ExecutionContext snapshots per step.
-Never:   Must not call Bedrock directly. Checkpoint data is stored in-memory
-         for the MVP; persistence to CockroachDB is a Phase B enhancement.
+Never:   Must not call Bedrock directly. Never unpickles: checkpoints are JSON,
+         so a tampered file cannot run code, and run/step ids are restricted to
+         safe characters so they cannot point outside the checkpoint folder.
 Ref:     WORKFLOW_ENGINE.md §7.
 """
 
 from __future__ import annotations
 
+import json
 import logging
-import os
-import pickle
+import re
 from pathlib import Path
 
 from workflow_engine.context import ExecutionContext
 
 logger = logging.getLogger(__name__)
 
-_CHECKPOINT_DIR = Path(os.path.join(os.path.dirname(__file__), "..", "tmp", "checkpoints"))
+_SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+
+
+def _checkpoint_dir() -> Path:
+    from config import data_dir
+
+    return Path(data_dir()) / "workflow_checkpoints"
+
+
+def _path(run_id: str, step_id: str) -> Path:
+    if not _SAFE_ID.match(str(run_id)) or not _SAFE_ID.match(str(step_id)) or ".." in f"{run_id}{step_id}":
+        raise ValueError("Invalid run or step id")
+    return _checkpoint_dir() / f"{run_id}_{step_id}.json"
 
 
 def save_checkpoint(run_id: str, step_id: str, context: ExecutionContext) -> str:
@@ -26,8 +39,8 @@ def save_checkpoint(run_id: str, step_id: str, context: ExecutionContext) -> str
 
     Returns the checkpoint file path.
     """
-    _CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
-    checkpoint_path = _CHECKPOINT_DIR / f"{run_id}_{step_id}.ckpt"
+    checkpoint_path = _path(run_id, step_id)
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         data = {
@@ -41,8 +54,7 @@ def save_checkpoint(run_id: str, step_id: str, context: ExecutionContext) -> str
                 "timing": context.timing,
             },
         }
-        with open(checkpoint_path, "wb") as f:
-            pickle.dump(data, f)
+        checkpoint_path.write_text(json.dumps(data, default=str), encoding="utf-8")
         logger.info(
             "checkpoint_store: saved | run=%s step=%s path=%s", run_id, step_id, checkpoint_path
         )
@@ -58,15 +70,18 @@ def load_checkpoint(run_id: str, step_id: str) -> ExecutionContext | None:
     """
     Restore an ExecutionContext from a checkpoint.
 
-    Returns None if no checkpoint exists.
+    Returns None if no checkpoint exists (or the ids are not valid).
     """
-    checkpoint_path = _CHECKPOINT_DIR / f"{run_id}_{step_id}.ckpt"
+    try:
+        checkpoint_path = _path(run_id, step_id)
+    except ValueError:
+        logger.warning("checkpoint_store: rejected unsafe id | run=%r step=%r", run_id, step_id)
+        return None
     if not checkpoint_path.exists():
         return None
 
     try:
-        with open(checkpoint_path, "rb") as f:
-            data = pickle.load(f)  # noqa: S301
+        data = json.loads(checkpoint_path.read_text(encoding="utf-8"))
         ctx_data = data.get("context", {})
         context = ExecutionContext(
             inputs=ctx_data.get("inputs", {}),
@@ -86,8 +101,10 @@ def load_checkpoint(run_id: str, step_id: str) -> ExecutionContext | None:
 
 def list_checkpoints(run_id: str) -> list[str]:
     """List all checkpoints for a given run."""
+    if not _SAFE_ID.match(str(run_id)):
+        return []
     checkpoints = sorted(
-        _CHECKPOINT_DIR.glob(f"{run_id}_*.ckpt"),
+        _checkpoint_dir().glob(f"{run_id}_*.json"),
         key=lambda path: path.stat().st_mtime,
     )
     return [str(p) for p in checkpoints]
@@ -95,7 +112,9 @@ def list_checkpoints(run_id: str) -> list[str]:
 
 def cleanup_checkpoints(run_id: str) -> None:
     """Remove all checkpoints for a given run."""
-    for checkpoint in _CHECKPOINT_DIR.glob(f"{run_id}_*.ckpt"):
+    if not _SAFE_ID.match(str(run_id)):
+        return
+    for checkpoint in _checkpoint_dir().glob(f"{run_id}_*.json"):
         try:
             checkpoint.unlink()
         except OSError:

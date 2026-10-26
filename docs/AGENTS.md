@@ -5,7 +5,7 @@ repository without re-discovering everything. Last full update: 2026-10-26.
 
 ## 1. What this product is
 
-**AUTOMATA** (product name *SMART_AUTOMATOR / autometav01*) is a local-first
+**AUTOMATA** (repository `SMART_AUTOMATOR`) is a local-first
 **AI development workspace for one developer on Windows**. It:
 
 - runs in the background (Tauri tray app that supervises a Python agent) and
@@ -16,13 +16,15 @@ repository without re-discovering everything. Last full update: 2026-10-26.
 - understands each project from its files (stack, run book, env vars,
   modules) instead of showing a fixed template;
 - controls other apps with **verified** actions (focus, type, paste, browser
-  tabs, OCR read-back) and hands multi-step tasks to Antigravity / Claude /
-  VS Code / ChatGPT, then tracks what is still needed from the user;
+  tabs, OCR read-back) — always after asking the user — and hands multi-step
+  tasks to Antigravity / Kilo Code / Claude / Cursor / VS Code / ChatGPT, then
+  tracks what is still needed from the user;
+- offers an AI work bar (Alt+Space) for questions, music, search and screen reading;
 - monitors the machine (CPU/GPU/RAM/disk) and which apps the user spends time in;
 - uses cloud LLMs when online and a local Ollama model when offline.
 
 Product status, the feature checklist and what is left: `docs/PROJECT_STATUS.md`.
-The phased plan these features came from: `docs/SMART_WORKSPACE_PLAN.md`.
+Security model and the latest audit: `docs/SECURITY.md`, `docs/SECURITY_AUDIT.md`.
 
 ## 2. Repository map
 
@@ -46,20 +48,21 @@ backend/                 Python 3.12 FastAPI agent (uv)
   automation/uia.py      UI Automation (focused field text, browser tabs) via comtypes
   automation/ocr.py      Windows OCR (windows_ocr.ps1) → Tesseract fallback
   automation/agent_bridge.py  picks the hand-off path: CLI, chat-box adapter, VS Code chat CLI, clipboard
-  automation/chat_apps.py  verified paste into AI apps' chat boxes (Antigravity "Message input", ...)
+  automation/chat_apps.py  verified paste into AI apps' chat boxes (Antigravity, Kilo Code, Cursor, Claude), agent_busy()
   automation/no_console.py  CREATE_NO_WINDOW for every child process (no console popups)
   assist/                 work bar quick commands: media keys + Spotify, web search, read screen
+  security/               permissions (ask before PC control), http_guard (local-only API), defender
   tasks/                 engine (clarify questions → ... → approval gates), questions, store (tasks.db), needs
   monitoring/            system_metrics (CPU/GPU/RAM…), app_usage (foreground-app tracker)
   decision_engine/       intent_parser (regex intents) → planner (actions + policies) → tools
   workflow_engine/       YAML workflows with checkpoints and gates
   db/client.py           ALL CockroachDB access (falls back to the local store when offline)
-  tests/                 pytest (350 tests); conftest isolates DB/providers/input
+  tests/                 pytest (395 tests); conftest isolates DB/providers/input
 frontend/                React 19 + Vite + TypeScript UI, Tauri 2 shell in src-tauri/
   src/App.tsx            navigation, active project, badges, health
   src/lib/api.ts         ALL HTTP calls + types;  src/lib/usePolling.ts  visibility-aware polling
   src/screens/           Dashboard, AIChat, Tasks, Inbox, Setup, Resources, Memory, Projects…
-  src/CompanionApp.tsx   AI work bar, Alt+Space / Ctrl+Alt+A (index.html#companion)
+  src/CompanionApp.tsx   AI work bar, Alt+Space, changeable in Settings (index.html#companion)
   src-tauri/src/lib.rs   tray, close-to-tray, single instance, autostart, backend supervisor
 docs/                    all documentation (this file, architecture, API, schema, status…)
 ```
@@ -70,18 +73,19 @@ Local data lives in `%LOCALAPPDATA%\AUTOMATA\` (`memory.db`, `tasks.db`,
 ## 3. Run and test
 
 ```powershell
+.\scripts\dev.ps1                                             # agent + UI (-Desktop: Tauri app)
 # backend
 cd backend; uv sync --extra dev; uv run python main.py      # http://127.0.0.1:8000/docs
 uv run pytest tests/ -q                                       # must stay green
-uv run ruff check . --select F,E9,B
+uv run ruff check .                                           # + security lint, see DEVELOPMENT.md
 # frontend
 cd frontend; npm ci; npm run dev                              # http://localhost:5173
-npx tsc -b; npx oxlint; npm test                              # type-check, lint, tests
+npx tsc -b; npx oxlint src; npm test                          # type-check, lint, tests
 # desktop app (needs Rust stable)
 npx tauri build --no-bundle    # → frontend/src-tauri/target/release/app.exe
 ```
 
-`.claude/launch.json` defines `backend` and `frontend` preview servers.
+CI (`.github/workflows/ci.yml`) runs the same checks on every push and pull request.
 
 ## 4. Rules that matter here
 
@@ -104,7 +108,9 @@ npx tauri build --no-bundle    # → frontend/src-tauri/target/release/app.exe
    or the project's `.env` — never to AUTOMATA's databases or logs. The profile
    reads env var *names*, never values.
 5. **Approval gates.** Task steps `handoff` and `verify` require explicit user
-   approval (`POST /tasks/{id}/approve`). Do not add auto-approval.
+   approval (`POST /tasks/{id}/approve`). Anything that controls the PC goes
+   through `security/permissions.check()` (or a chat approval card). Never accept a
+   caller-supplied "approved" flag, and never add auto-approval.
 6. **Windows-first.** Automation targets Windows 10/11. Other platforms must
    fail with a clear message, not crash.
 7. **Output style.** Short, factual, no chatbot filler; say "No memory found for
@@ -117,6 +123,9 @@ npx tauri build --no-bundle    # → frontend/src-tauri/target/release/app.exe
   New dependency → `docs/TECH_STACK.md`. Feature status → `docs/PROJECT_STATUS.md`.
 - Add tests next to the feature (`backend/tests/test_<area>.py`,
   `frontend/src/**/X.test.tsx`) that assert real outputs and failure states.
+- Security-relevant change → regression test in `tests/test_permissions.py`
+  and a line in `docs/SECURITY_AUDIT.md` if it fixes a finding.
+- Notable change → `CHANGELOG.md` (Unreleased). See `CONTRIBUTING.md`.
 - Commit only when the user asks.
 
 ## 6. Useful entry points for common requests

@@ -15,7 +15,8 @@ from fastapi.testclient import TestClient
 from api.server import app
 from memory import local_store
 from memory.local_store import LocalStore
-from tasks import engine, store as task_store_mod
+from tasks import engine
+from tasks import store as task_store_mod
 from tasks.store import TaskStore
 
 client = TestClient(app)

@@ -1,116 +1,98 @@
 # Product brief
 
-## 1. Product identity
+## 1. Product
 
-**autometav01** is a local developer-workflow memory product. The codebase
-uses the internal name AUTOMATA in package metadata, logs, and some UI text.
+**AUTOMATA** (repository: `SMART_AUTOMATOR`) is a local-first AI development
+workspace for one developer on Windows.
 
-## 2. Product problem
+## 2. Problem
 
 Project context is fragmented across files, git history, terminal sessions,
 and chat. Developers repeatedly reconstruct what changed, why it changed, and
-what remains to be done.
+what remains to be done — and spend more time again briefing AI coding tools.
 
 ## 3. Intended user
 
-The MVP serves one developer on one Windows machine working across one or more
-local repositories. It is not a team collaboration or hosted multi-user
-product.
+One developer on one Windows machine working across several local
+repositories. Not a team or hosted multi-user product.
 
 ## 4. Core experience
 
-1. Register a local repository and select it in the desktop UI.
-2. Capture project activity in the background while the backend is running.
-3. Ask questions or request an action from the project context.
-4. Review generated answers, action cards, progress, and approval prompts.
-5. Return later to a brief, activity history, or workspace restore flow.
+1. Register a local repository; AUTOMATA works out its stack, run commands,
+   environment variables and modules.
+2. It captures activity (edits, commits, terminal commands) in the background
+   and keeps it in local memory that works offline.
+3. Ask about the project in chat or the work bar (Alt+Space) and get answers
+   grounded in that memory.
+4. Hand work to an AI app (Antigravity, Kilo Code, Claude, Cursor, VS Code):
+   AUTOMATA asks what it needs, writes the prompt, delivers it with your
+   approval, watches the result and lists keys you still have to provide.
+5. Come back later to a brief and **Resume** — the editor you last used, your
+   recent files, terminal and dev servers.
 
-## 5. Capability inventory
+## 5. Capabilities
 
-| Capability | Implementation surface |
+| Capability | Where |
 | --- | --- |
-| Project and session management | FastAPI project/session routes and CockroachDB client |
-| Activity capture | File watcher, git poller, and terminal-history capture |
-| Persistent memory | Structured CockroachDB rows and vector columns |
-| Memory retrieval | Recent-row and semantic-vector retrieval paths |
-| Chat and intent routing | Chat API, intent parser, planner, and action cards |
-| Morning brief and activity | Brief API, activity feed, and related UI screens |
-| Agent actions | Commit message, explain repository, find code, continue work, start environment |
-| Workspace automation | Windows restore and development-server controls |
-| Diagnostics and analytics | Project diagnostics, analytics, and live metrics routes |
-| Autonomous decisions | Commit/session triggers with decision-log provenance |
-| Cross-app and visual actions | Clipboard, app focus, keystrokes, screen capture, and OCR tools |
-| Workflow execution | Versioned workflows with checkpoints and approval gates |
+| Always-on tray app, agent supervisor, start at sign-in | `frontend/src-tauri/` |
+| Local memory (SQLite FTS5), optional CockroachDB cloud copy | `memory/`, `db/` |
+| Activity capture, snapshots and resume | `memory/capture.py`, `workspace/` |
+| Project profiles (stack, run book, env vars, modules) | `intelligence/` |
+| Chat and intent routing with approval cards | `decision_engine/`, `api/` |
+| Delegation tasks with questions, approval gates, Needs inbox | `tasks/`, `automation/chat_apps.py` |
+| Verified desktop control and OCR | `automation/` |
+| AI work bar: music, search, screen reading | `assist/`, `CompanionApp.tsx` |
+| Permissions and local-only API | `security/` |
+| System and app-usage analytics, briefs, workflows | `monitoring/`, `workflow_engine/` |
+| Cloud models online, Ollama offline | `ai/` |
 
-The table records code surfaces, not a guarantee that every integration has
-passed end-to-end verification. Check [the QA checklist](QA_CHECKLIST.md)
-for the evidence required to call a feature verified.
+Verification status of each: [PROJECT_STATUS.md](PROJECT_STATUS.md).
 
-## 6. MVP boundaries
+## 6. Boundaries
 
-- Single local developer; no accounts, teams, or hosted tenancy.
-- Windows is the supported automation target. Other operating systems are
-  not promised.
-- CockroachDB is the persistent memory store; disconnected startup is
-  degraded operation, not durable memory.
-- External model services, Ollama, OCR engines, and desktop applications may
-  be unavailable or require separate setup.
-- The UI is an orchestration surface, not a replacement IDE or terminal.
+- Single local user; no accounts, teams or hosted tenancy.
+- Windows is the supported platform for desktop automation.
+- Local memory is the source of truth; CockroachDB is an optional copy.
+- Cloud model providers, Ollama, OCR language packs and other apps may be
+  unavailable or need setup; AUTOMATA reports that instead of failing silently.
+- The UI orchestrates work; it does not replace the IDE or terminal.
 
-## 7. User-facing output
+## 7. Output style
 
-Keep replies and briefs concise, factual, and grounded in captured data.
-Distinguish recalled facts from generated suggestions. If retrieval has no
-supporting result, say that no memory was found instead of inventing details.
+Replies and briefs are short, factual and grounded in captured data. Recalled
+facts are kept apart from suggestions. With no supporting memory the answer is
+"No memory found for that query" — never invented detail.
 
-## 8. Runtime and data boundary
+## 8. Safety
 
-The frontend communicates with the local FastAPI service. The backend owns
-database access, provider calls, memory capture/retrieval, planning, and
-automation. Captured activity can include repository paths, commit messages,
-file names, and redacted terminal commands.
+Passive, reversible work runs automatically. Anything that controls the PC asks
+first, and sending work to another app or running builds needs explicit
+approval. See [ACTION_POLICIES.md](ACTION_POLICIES.md) and [SECURITY.md](SECURITY.md).
 
-## 9. Action safety
+## 9. Success criteria
 
-Passive and reversible operations may run automatically. Actions that change
-the workspace or interact with another app must use the planner/workflow
-approval policy. External submission requires explicit approval. See
-[the security guide](SECURITY.md).
+- Fresh setup works without machine-specific paths or required cloud services.
+- Health and setup expose missing services clearly, with a fix for each.
+- Capture, retrieval, brief, chat and restore pass automated tests and the
+  manual checks in [QA_CHECKLIST.md](QA_CHECKLIST.md).
+- OS and provider failures stay visible and never masquerade as success.
+- No real credentials are committed, persisted in memory or sent to a model.
 
-## 10. Success criteria
+## 10. Out of scope
 
-- Fresh setup instructions work without undocumented machine-specific paths.
-- Health and project setup expose missing services clearly.
-- Core memory capture, retrieval, brief, chat, and restore flows pass automated
-  tests and the manual checks in `docs/QA_CHECKLIST.md`.
-- OS and external-provider failures remain visible and do not masquerade as
-  successful actions.
-- No real credentials are committed, persisted in memory, or sent to a model.
-
-## 11. Product status
-
-The repository contains implementations for the capability inventory above.
-The current phase is MVP stabilization: validate each user-facing surface,
-record reproducible defects, and fix them one at a time.
-
-## 12. Out of scope
-
-- Multi-user access control, hosted deployment, and team features.
+- Multi-user access control, hosted deployment and team features.
 - Cross-platform automation parity.
 - Unbounded autonomous execution or silent irreversible changes.
-- Claims of production readiness before the security and QA gates are met.
 
-## 13. Manual acceptance flow
+## 11. Manual acceptance flow
 
-1. Start the API and UI; confirm backend and database status are visible.
-2. Register and select a local test project.
-3. Confirm captured commits/file edits can be found in activity and memory.
+1. Start the app; confirm agent and database status are visible.
+2. Register and select a disposable test project.
+3. Confirm captured commits and edits appear in activity and memory.
 4. Ask a factual question supported by captured data and inspect its sources.
-5. Generate a brief and verify it reflects stored project activity.
-6. Restore a disposable test workspace and inspect each reported step.
-7. Trigger an approval-gated action and confirm it does not proceed before
-   approval.
-8. Stop optional services and verify the UI/API report degraded behavior.
+5. Generate a brief and check it reflects stored activity.
+6. Resume the test workspace and inspect each reported step.
+7. Trigger an approval-gated action and confirm nothing happens before approval.
+8. Stop optional services and confirm the UI/API report degraded behaviour.
 
-Run this flow only against a disposable local project and a non-production
-test database.
+Run this only against a disposable project and a non-production database.

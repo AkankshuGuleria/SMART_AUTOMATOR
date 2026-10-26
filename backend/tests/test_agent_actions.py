@@ -3,6 +3,7 @@ tests/test_agent_actions.py — Regression tests for Phase 4 Agent Actions.
 """
 
 from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
 from api.server import app
@@ -52,12 +53,12 @@ def test_project_summary_route(monkeypatch):
 
 
 def test_cross_app_tasks_route():
+    payload = {"task_id": "task-test-1", "action": "copy_to_clipboard", "params": {"text": "hello"}}
     with patch("agent_actions.submit_cross_app_task", return_value={"task_id": "task-test-1", "status": "queued"}) as mock_submit:
-        response = client.post("/cross-app/tasks", json={
-            "task_id": "task-test-1",
-            "action": "copy_to_clipboard",
-            "params": {"text": "hello"}
-        })
+        first = client.post("/cross-app/tasks", json=payload).json()
+        assert first["status"] == "needs_permission"  # app control asks first
+        mock_submit.assert_not_called()
+        response = client.post("/cross-app/tasks", json={**payload, "permission_id": first["needs_permission"]["id"]})
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "queued"

@@ -3,6 +3,7 @@
  * Premium AI chat experience: glass conversation panel, memory refs, action cards, code blocks.
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { withPermission } from '../lib/permissions'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Send, Sparkles, ChevronRight, Copy, Check, Zap, Loader2 } from 'lucide-react'
 import {
@@ -30,13 +31,17 @@ const QUICK_ACTIONS = [
   { label: 'Run tests', text: 'run tests' },
 ]
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
+/**
+ * **bold** and `code` as React elements. Replies can echo captured file names,
+ * commit messages, OCR'd screen text or model output, so they are never turned
+ * into HTML — text nodes cannot inject markup or script.
+ */
+function inline(text: string, key: string): React.ReactNode[] {
+  return text.split(/(\*\*[^*]+?\*\*|`[^`]+`)/g).filter(Boolean).map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) return <b key={`${key}-${i}`}>{part.slice(2, -2)}</b>
+    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) return <code key={`${key}-${i}`}>{part.slice(1, -1)}</code>
+    return part
+  })
 }
 
 function parseContent(text: string, id: string): React.ReactNode[] {
@@ -44,21 +49,17 @@ function parseContent(text: string, id: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = []
   lines.forEach((line, i) => {
     const key = `${id}-${i}`
-    // Replies can echo captured file/terminal content, so escape before formatting.
-    const processed = escapeHtml(line)
-      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
     if (line.startsWith('• ') || line.startsWith('- ')) {
       nodes.push(
         <div key={key} style={{ display: 'flex', gap: '0.4rem', marginLeft: '0.5rem', lineHeight: 1.6 }}>
           <span style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }}>▸</span>
-          <span dangerouslySetInnerHTML={{ __html: processed.slice(2) }} />
+          <span>{inline(line.slice(2), key)}</span>
         </div>
       )
     } else if (line === '') {
       nodes.push(<div key={key} style={{ height: '0.45rem' }} />)
     } else {
-      nodes.push(<div key={key} dangerouslySetInnerHTML={{ __html: processed }} style={{ lineHeight: 1.65 }} />)
+      nodes.push(<div key={key} style={{ lineHeight: 1.65 }}>{inline(line, key)}</div>)
     }
   })
   return nodes
@@ -150,11 +151,11 @@ export default function AIChatScreen({ projectId, onActivity, initialMessage, on
     const userMsg: Message = { id: Date.now().toString(), role: 'user', content: trimmed, timestamp: new Date() }
     setMessages(prev => [...prev, userMsg])
     try {
-      const res = await sendChatMessage(trimmed, projectId, projectId)
+      const res = await withPermission(pid => sendChatMessage(trimmed, projectId, projectId, false, pid))
       const agentMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'agent',
-        content: res.reply ?? res.error ?? 'No response',
+        content: res.denied ? 'Cancelled — nothing was done.' : (res.reply ?? res.error ?? 'No response'),
         timestamp: new Date(),
         intent: res.intent,
         actions: res.actions ?? [],

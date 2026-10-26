@@ -7,6 +7,8 @@ import { motion } from 'framer-motion'
 import { defaultContainer, defaultItem } from '../components/ui/VariantHelpers'
 import { Settings, Cpu, Moon, Sun, Zap, Info, ExternalLink, Power, Clock } from 'lucide-react'
 import GlassCard from '../components/ui/GlassCard'
+import WorkBarSettings from '../components/WorkBarSettings'
+import PermissionsSettings from '../components/PermissionsSettings'
 import {
   getAutostart,
   setAutostart,
@@ -223,6 +225,12 @@ export default function SettingsScreen({ reasoningMode, onModeChange, theme, onT
         {/* Background agent */}
         <motion.div variants={item}>
           <BackgroundAgentCard />
+        </motion.div>
+        <motion.div variants={item}>
+          <WorkBarSettings />
+        </motion.div>
+        <motion.div variants={item}>
+          <PermissionsSettings />
         </motion.div>
 
         {/* Appearance */}

@@ -181,7 +181,7 @@ def dedup_key(kind: str, content: str, created_at: float, repo_path: str | None 
     scope = DEDUP_SCOPE.get(kind)
     if not scope:
         return None
-    digest = hashlib.sha1(_dedup_text(kind, content, repo_path).encode("utf-8")).hexdigest()[:20]
+    digest = hashlib.sha1(_dedup_text(kind, content, repo_path).encode("utf-8"), usedforsecurity=False).hexdigest()[:20]
     if scope == "day":
         digest += ":" + time.strftime("%Y-%m-%d", time.localtime(created_at))
     return digest
@@ -236,7 +236,7 @@ class LocalStore:
         roots = {r["id"]: r["repo_path"] for r in self._conn.execute("SELECT id, repo_path FROM projects")}
         kinds = list(DEDUP_SCOPE)
         rows = self._conn.execute(
-            f"SELECT id, project_id, kind, content, created_at FROM memories "
+            f"SELECT id, project_id, kind, content, created_at FROM memories "  # noqa: S608 — only '?' placeholders are interpolated
             f"WHERE kind IN ({','.join('?' * len(kinds))}) ORDER BY id",
             kinds,
         ).fetchall()
@@ -277,7 +277,7 @@ class LocalStore:
                 )
             for i in range(0, len(drop), 500):
                 chunk = drop[i:i + 500]
-                self._conn.execute(f"DELETE FROM memories WHERE id IN ({','.join('?' * len(chunk))})", chunk)
+                self._conn.execute(f"DELETE FROM memories WHERE id IN ({','.join('?' * len(chunk))})", chunk)  # noqa: S608 — only '?' placeholders are interpolated
             self._conn.execute("COMMIT")
         except Exception:
             self._conn.execute("ROLLBACK")
@@ -476,7 +476,7 @@ class LocalStore:
         with self._lock:
             if match:
                 rows = self._conn.execute(
-                    "SELECT m.*, bm25(memories_fts) AS rank FROM memories_fts "
+                    "SELECT m.*, bm25(memories_fts) AS rank FROM memories_fts "  # noqa: S608 — filters contain only '?' placeholders
                     "JOIN memories m ON m.id = memories_fts.rowid "
                     f"WHERE memories_fts MATCH ? {filters} ORDER BY rank LIMIT ?",
                     [match, *args, max(200, limit * 25)],
@@ -495,7 +495,7 @@ class LocalStore:
                     scored[int(r["id"])] = (kw * (0.85 + 0.15 * recency), r)
             if query_embedding:
                 rows = self._conn.execute(
-                    f"SELECT m.* FROM memories m WHERE m.embedding IS NOT NULL {filters} "
+                    f"SELECT m.* FROM memories m WHERE m.embedding IS NOT NULL {filters} "  # noqa: S608 — filters contain only '?' placeholders
                     "ORDER BY m.created_at DESC LIMIT 2000",
                     args,
                 ).fetchall()

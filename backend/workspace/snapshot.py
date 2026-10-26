@@ -21,11 +21,95 @@ logger = logging.getLogger(__name__)
 
 SNAPSHOT_INTERVAL_S = 10 * 60
 DEV_APPS = {
-    "code.exe": "VS Code", "cursor.exe": "Cursor", "antigravity.exe": "Antigravity",
-    "windowsterminal.exe": "Windows Terminal", "powershell.exe": "PowerShell", "pwsh.exe": "PowerShell",
+    "code.exe": "VS Code", "cursor.exe": "Cursor", "antigravity ide.exe": "Antigravity IDE",
+    "antigravity.exe": "Antigravity", "windowsterminal.exe": "Windows Terminal",
+    "powershell.exe": "PowerShell", "pwsh.exe": "PowerShell",
     "chrome.exe": "Chrome", "msedge.exe": "Edge", "firefox.exe": "Firefox", "claude.exe": "Claude",
 }
-EDITOR_COMMANDS = {"VS Code": "code", "Cursor": "cursor", "Antigravity": "antigravity-ide"}
+# Editors that open a folder: process exe → (label, launcher name for resolve_executable)
+EDITORS = {
+    "antigravity ide.exe": ("Antigravity IDE", "antigravity-ide"),
+    "code.exe": ("VS Code", "code"),
+    "cursor.exe": ("Cursor", "cursor"),
+}
+EDITOR_BY_LABEL = {label: (exe, cmd) for exe, (label, cmd) in EDITORS.items()}
+USAGE_LOOKBACK_S = 30 * 86400
+
+
+def _workspace_folder(title: str, repo: str) -> str | None:
+    """Folder a VS Code-style window shows, if it belongs to *repo*.
+
+    Titles look like "file.tsx - folder - Visual Studio Code" or
+    "folder - Antigravity IDE - file". The folder is the repo itself or a
+    folder directly inside it (D:\\REACT\\vite-project for project D:\\REACT).
+    """
+    if not repo or not os.path.isdir(repo):
+        return None
+    parts = [p.strip().lstrip("●✓◔ ").strip() for p in title.split(" - ") if p.strip()]
+    base = Path(repo).name.lower()
+    try:
+        children = {c.name.lower(): str(c) for c in Path(repo).iterdir() if c.is_dir()}
+    except OSError:
+        children = {}
+    for part in parts:
+        low = part.lower()
+        if low == base:
+            return repo
+        if low in children and low not in {"node_modules", ".git", "dist", "build"}:
+            return children[low]
+    return None
+
+
+def last_editor(project_id: str, repo: str) -> dict[str, Any] | None:
+    """Which editor (and folder) the user last worked in for this project.
+
+    Order: an editor window open now → the app-usage history (newest first) →
+    the last one remembered. Returns {app, folder, seen_at, source} or None.
+    """
+    for w in _editor_windows():
+        folder = _workspace_folder(w.title, repo)
+        if folder:
+            return {"app": EDITORS[w.exe.lower()][0], "folder": folder, "seen_at": time.time(), "source": "open window"}
+    try:
+        import sqlite3
+
+        from monitoring.app_usage import default_db_path
+
+        path = default_db_path()
+        if os.path.exists(path):
+            conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)
+            try:
+                rows = conn.execute(
+                    "SELECT exe, title, ended_at FROM usage_segments WHERE ended_at > ? "  # noqa: S608 — only '?' placeholders are interpolated
+                    f"AND lower(exe) IN ({','.join('?' * len(EDITORS))}) ORDER BY ended_at DESC LIMIT 500",
+                    (time.time() - USAGE_LOOKBACK_S, *EDITORS),
+                ).fetchall()
+            finally:
+                conn.close()
+            for exe, title, ended in rows:
+                folder = _workspace_folder(title or "", repo)
+                if folder:
+                    return {"app": EDITORS[exe.lower()][0], "folder": folder, "seen_at": ended, "source": "usage history"}
+    except Exception as exc:
+        logger.debug("last_editor: usage history unavailable — %s", exc)
+    try:
+        from memory.local_store import get_store
+
+        saved = get_store().get_value(f"last_editor:{project_id}")
+        if saved and saved.get("app") in EDITOR_BY_LABEL and os.path.isdir(saved.get("folder") or ""):
+            return {**saved, "source": "remembered"}
+    except Exception:
+        pass
+    return None
+
+
+def _editor_windows():
+    try:
+        from automation import win32
+
+        return [w for w in win32.top_level_windows() if w.exe.lower() in EDITORS and w.title]
+    except Exception:
+        return []
 
 
 def _git(repo: str, *args: str) -> str:
@@ -122,6 +206,10 @@ def take_snapshot(project_id: str, reason: str = "manual") -> dict[str, Any]:
         data["current_task"] = active_task_summary(project_id)
     except Exception:
         data["current_task"] = None
+    data["editor"] = last_editor(project_id, repo) if has_repo else None
+    if data["editor"]:
+        store.set_value(f"last_editor:{project_id}",
+                        {k: data["editor"][k] for k in ("app", "folder", "seen_at")})
     snap_id = store.save_snapshot(project_id, data, reason)
     return {"success": True, "id": snap_id, "reason": reason, "created_at": time.time(), "data": data}
 
@@ -142,27 +230,7 @@ def resume(project_id: str, open_editor: bool = True, open_terminal: bool = True
         return {"success": False, "error": f"Project folder not found: {repo}", "steps": steps}
 
     if open_editor:
-        editor = next(
-            (w["app"] for w in data.get("open_windows", []) if w["app"] in EDITOR_COMMANDS and w["related"]),
-            "VS Code",
-        )
-        cmd = EDITOR_COMMANDS[editor]
-        files = [f for f in data.get("recent_files", [])[:8] if os.path.exists(f)]
-        try:
-            import shutil
-
-            exe = shutil.which(cmd) or (cmd if editor != "Antigravity" else None)
-            if not exe:
-                from automation.agent_bridge import _detect
-
-                exe = _detect("antigravity").app_path
-            if exe:
-                subprocess.Popen([exe, "-r", repo, *files], shell=False)
-                steps.append({"step": "editor", "status": "ok", "detail": f"{editor}: {len(files)} recent files"})
-            else:
-                steps.append({"step": "editor", "status": "error", "detail": f"{editor} command not found"})
-        except Exception as exc:
-            steps.append({"step": "editor", "status": "error", "detail": str(exc)})
+        steps.append(_reopen_editor(project_id, repo, data))
 
     if open_terminal:
         ok = _open_terminal(repo)
@@ -174,10 +242,18 @@ def resume(project_id: str, open_editor: bool = True, open_terminal: bool = True
             if server["port"] in running:
                 steps.append({"step": "dev_server", "status": "skipped", "detail": f"port {server['port']} already running"})
                 continue
+            # Never re-run a stored command line: use the run book AUTOMATA derives
+            # from the project's manifest ("npm run dev") for that folder.
+            cwd = server.get("cwd") or repo
+            cmd = _run_book_command(repo, cwd)
+            if not cmd:
+                steps.append({"step": "dev_server", "status": "skipped",
+                              "detail": f"no dev command found for {Path(cwd).name}"})
+                continue
             try:
-                subprocess.Popen(server["command"], cwd=server.get("cwd") or repo, shell=True,
+                subprocess.Popen(cmd, cwd=cwd, shell=True,  # noqa: S602  # nosec B602 — run-book command, user-approved
                                  creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
-                steps.append({"step": "dev_server", "status": "ok", "detail": f"restarted on port {server['port']}"})
+                steps.append({"step": "dev_server", "status": "ok", "detail": f"`{cmd}` for port {server['port']}"})
             except Exception as exc:
                 steps.append({"step": "dev_server", "status": "error", "detail": str(exc)})
 
@@ -195,6 +271,73 @@ def resume(project_id: str, open_editor: bool = True, open_terminal: bool = True
         },
         "steps": steps,
     }
+
+
+def _run_book_command(repo: str, cwd: str) -> str | None:
+    """The project's own dev/start command for *cwd* (from the detected run book)."""
+    try:
+        from intelligence.profile import detect
+
+        profile = detect(repo)
+    except Exception:
+        return None
+    target = os.path.normcase(os.path.realpath(cwd))
+    for entry in profile.get("run_book", []):
+        folder = os.path.join(repo, entry["path"]) if entry["path"] != "." else repo
+        if os.path.normcase(os.path.realpath(folder)) == target:
+            return entry["commands"].get("dev") or entry["commands"].get("start")
+    return None
+
+
+def describe_resume(project_id: str, opts: dict[str, Any] | None = None) -> str:
+    """What Resume will do, in plain words (shown in the permission prompt)."""
+    from memory.local_store import get_store
+
+    opts = opts or {}
+    snap = get_store().latest_snapshot(project_id)
+    data = (snap or {}).get("data", {})
+    repo = data.get("repo_path", "")
+    parts = []
+    if opts.get("open_editor", True):
+        editor = last_editor(project_id, repo) if repo else None
+        parts.append(f"open {editor['app']} in {Path(editor['folder']).name}" if editor else "open your editor")
+    if opts.get("open_terminal", True):
+        parts.append("open a terminal")
+    servers = [s["port"] for s in data.get("dev_servers", [])]
+    if opts.get("start_servers", True) and servers:
+        parts.append("restart dev server" + ("s" if len(servers) > 1 else "") + " on port " + ", ".join(map(str, servers)))
+    return "Resume your workspace: " + ", ".join(parts) if parts else "Resume your workspace"
+
+
+def _reopen_editor(project_id: str, repo: str, data: dict[str, Any]) -> dict[str, Any]:
+    """Open the editor the user last used for this project, in the folder they had open."""
+    from automation.os_windows import resolve_executable
+
+    # Fresh look first (the user may have switched editors since the snapshot).
+    editor = last_editor(project_id, repo) or data.get("editor")
+    if not editor:
+        installed = [label for exe, (label, cmd) in EDITORS.items() if resolve_executable(cmd)]
+        if not installed:
+            return {"step": "editor", "status": "error", "detail": "No supported editor found (Antigravity IDE, VS Code, Cursor)."}
+        editor = {"app": installed[0], "folder": repo, "source": "default (no editor recorded yet)"}
+    label = editor["app"]
+    folder = editor.get("folder") if os.path.isdir(editor.get("folder") or "") else repo
+    cmd = EDITOR_BY_LABEL.get(label, (None, None))[1]
+    exe = resolve_executable(cmd) if cmd else None
+    if not exe:
+        return {"step": "editor", "status": "error", "detail": f"{label} is not installed any more."}
+    files = [f for f in data.get("recent_files", [])[:8]
+             if os.path.exists(f) and os.path.normcase(f).startswith(os.path.normcase(folder))]
+    try:
+        # The real .exe (not a .cmd launcher), so no console window appears.
+        subprocess.Popen([exe, folder, *files], cwd=folder, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        return {"step": "editor", "status": "error", "detail": f"Could not start {label}: {exc}"}
+    when = editor.get("seen_at")
+    seen = f", last used {time.strftime('%d %b %H:%M', time.localtime(when))}" if when else ""
+    return {"step": "editor", "status": "ok", "app": label, "folder": folder,
+            "detail": f"{label} in {Path(folder).name}{seen} ({editor.get('source')}); {len(files)} recent files"}
 
 
 class SnapshotThread(threading.Thread):

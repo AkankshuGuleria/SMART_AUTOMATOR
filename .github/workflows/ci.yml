@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Python)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install
+        run: uv sync --extra dev --locked
+      - name: Lint (ruff, incl. security rules)
+        run: uv run ruff check .
+      - name: Tests
+        run: uv run pytest tests/ -q
+      - name: Dependency audit
+        shell: bash
+        run: |
+          uv export --no-hashes --no-emit-project --all-extras --format requirements-txt > "$RUNNER_TEMP/reqs.txt"
+          uvx pip-audit -r "$RUNNER_TEMP/reqs.txt"
+
+  frontend:
+    name: Frontend (React)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Lint
+        run: npx oxlint src
+      - name: Tests
+        run: npm test
+      - name: Type-check and build
+        run: npm run build
+      - name: Dependency audit
+        run: npm audit --audit-level=moderate
+
+  desktop-audit:
+    name: Desktop shell (Rust) audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: cargo audit
+        working-directory: frontend/src-tauri
+        run: cargo audit

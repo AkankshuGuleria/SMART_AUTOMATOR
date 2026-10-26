@@ -212,8 +212,9 @@ def start_project_dev_servers(repo_path: str) -> list[dict]:
             continue
         cwd = os.path.join(repo_path, entry["path"]) if entry["path"] != "." else repo_path
         try:
-            subprocess.Popen(
-                cmd, cwd=cwd, shell=True, creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+            # Shell on purpose: a run-book command AUTOMATA derived ("npm run dev"), user-approved.
+            subprocess.Popen(  # noqa: S602
+                cmd, cwd=cwd, shell=True, creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0)  # nosec B602 — run-book command, user-approved
             )
             results.append({"server": name, "status": "ok", "detail": f"`{cmd}` in {cwd}"})
         except Exception as exc:

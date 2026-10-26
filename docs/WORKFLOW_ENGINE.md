@@ -22,7 +22,7 @@ resolution.
 ## 3. Execution and gates
 
 `executor.py` runs each step and derives approval gates from the registered
-tool policies. The policy tiers are documented in `FEATURES_PHASE.md`.
+tool policies. The policy tiers are documented in `ACTION_POLICIES.md`.
 `gate_resolver.py` groups gated steps according to the contiguous-gate rules;
 `auto_execute` steps break a gated sequence.
 
@@ -32,9 +32,11 @@ completion.
 
 ## 4. Checkpoints
 
-`checkpoint_store.py` persists workflow run and step state through the shared
-database client. A resumed workflow must not repeat completed side effects
-unless the step is explicitly designed to be idempotent.
+`checkpoint_store.py` saves each step's execution context as JSON under
+`%LOCALAPPDATA%\AUTOMATA\workflow_checkpoints\` (never `pickle`, so a tampered
+file cannot run code). Run and step ids are limited to `[A-Za-z0-9_.-]` so they
+cannot point outside that folder. A resumed workflow must not repeat completed
+side effects unless the step is explicitly designed to be idempotent.
 
 ## 5. Triggers and provenance
 

@@ -1,8 +1,18 @@
+"""
+scripts/check_db_status.py — row counts per table in the optional CockroachDB cloud copy.
+
+Run from the repo root:  uv run --project backend python scripts/check_db_status.py
+"""
+
 import logging
+import sys
+from pathlib import Path
 
-from sqlalchemy import text
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-from db.client import get_session
+from sqlalchemy import text  # noqa: E402
+
+from db.client import get_session  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 

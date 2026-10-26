@@ -96,21 +96,29 @@ class TaskStore:
                 )
         return tid
 
+    _TASK_COLUMNS = frozenset({"project_id", "title", "request", "agent", "status", "current_step", "summary",
+                               "updated_at"})
+    _STEP_COLUMNS = frozenset({"title", "policy", "status", "detail", "output", "started_at", "finished_at"})
+
     def update_task(self, task_id: str, **fields: Any) -> None:
         if not fields:
             return
+        if unknown := set(fields) - self._TASK_COLUMNS:  # column names go into SQL: allow-list them
+            raise ValueError(f"unknown task fields: {sorted(unknown)}")
         fields["updated_at"] = time.time()
         cols = ", ".join(f"{k} = ?" for k in fields)
         with self._lock:
             self._conn.execute(f"UPDATE tasks SET {cols} WHERE id = ?", (*fields.values(), task_id))  # noqa: S608
 
     def update_step(self, task_id: str, idx: int, **fields: Any) -> None:
+        if unknown := set(fields) - self._STEP_COLUMNS:
+            raise ValueError(f"unknown step fields: {sorted(unknown)}")
         if "output" in fields and not isinstance(fields["output"], str | None):
             fields["output"] = json.dumps(fields["output"], default=str)
         cols = ", ".join(f"{k} = ?" for k in fields)
         with self._lock:
             self._conn.execute(  # noqa: S608
-                f"UPDATE task_steps SET {cols} WHERE task_id = ? AND idx = ?", (*fields.values(), task_id, idx)
+                f"UPDATE task_steps SET {cols} WHERE task_id = ? AND idx = ?", (*fields.values(), task_id, idx)  # noqa: S608 — column names are allow-listed (_STEP_COLUMNS)
             )
         self.update_task(task_id)
 

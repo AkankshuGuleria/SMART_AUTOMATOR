@@ -1,5 +1,7 @@
 """
-seed_project.py — Seed AUTOMATA as a tracked project with initial architecture notes.
+scripts/seed_project.py — register AUTOMATA itself as a tracked project with initial architecture notes.
+
+Run from the repo root:  uv run --project backend python scripts/seed_project.py
 """
 
 from __future__ import annotations

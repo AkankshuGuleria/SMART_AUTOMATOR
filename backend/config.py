@@ -66,7 +66,7 @@ class Settings:
 
 
 def _load_settings() -> Settings:
-    raw_dim = os.getenv("EMBEDDING_DIMENSION", "0")
+    raw_dim = os.getenv("EMBEDDING_DIMENSION") or "0"  # empty in .env.example = not set
     try:
         dim = int(raw_dim)
     except ValueError:

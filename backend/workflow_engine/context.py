@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 def check_privacy_guardrail(content: str) -> bool:
     """
     Check if content contains secrets, code, or private URLs
-    that should trigger escalation (per FEATURES_PHASE.md §5).
+    that should trigger escalation (see docs/ACTION_POLICIES.md).
 
     Returns True if content is flagged (contains potential secrets).
     """

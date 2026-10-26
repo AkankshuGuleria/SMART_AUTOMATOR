@@ -71,11 +71,21 @@ def _element_text(el, include_name: bool = True) -> str:
     for getter in getters:
         try:
             text = getter()
-            if text and str(text).strip():
+            if text and visible_text(str(text)):
                 return str(text)
         except Exception:
             continue
     return ""
+
+
+# Invisible characters rich editors put in "empty" boxes: object replacement
+# (Kilo Code's placeholder span), zero-width space/joiners, BOM.
+_INVISIBLE = dict.fromkeys(map(ord, "￼​‌‍﻿"), None)
+
+
+def visible_text(text: str) -> str:
+    """*text* without invisible placeholder characters and surrounding whitespace."""
+    return (text or "").translate(_INVISIBLE).strip()
 
 
 def focused_text() -> dict[str, Any]:

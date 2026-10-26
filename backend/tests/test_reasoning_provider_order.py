@@ -5,7 +5,6 @@ import urllib.error
 import pytest
 
 from ai import bedrock_client
-import config
 
 
 @pytest.fixture(autouse=True)

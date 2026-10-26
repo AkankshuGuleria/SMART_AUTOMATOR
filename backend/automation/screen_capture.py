@@ -6,7 +6,7 @@ Owns:    Capturing screenshots of the full screen, active window, or selected
          decision engine's visual action executors.
 Never:   Must not write to CockroachDB. Must not call Bedrock.
          Must not be called from Memory Engine or Reasoning Engine code.
-Ref:     ARCHITECTURE.md §3.2c, FEATURES_PHASE.md §9 (Visual Feedback Layer).
+Ref:     docs/ARCHITECTURE.md §3.6, docs/ACTION_POLICIES.md (screen actions).
 """
 
 import logging

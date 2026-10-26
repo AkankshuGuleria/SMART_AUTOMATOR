@@ -61,8 +61,11 @@ def test_chat_desktop_intent_works_without_project():
     ) as mock_open:
         body = client.post("/chat", json={"message": "open spotify"}).json()
     assert body["intent"] == "open_app"
-    assert body["actions"][0]["executed"] is True
-    mock_open.assert_called_once()
+    # Opening an app asks first: an approval card, nothing launched yet.
+    assert body["actions"][0]["executed"] is False
+    assert body["actions"][0]["policy"] == "confirm_once"
+    assert body["actions"][0]["permission"] == "Open apps and websites"
+    mock_open.assert_not_called()
 
 
 def test_chat_project_intent_without_project_explains_why():

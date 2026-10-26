@@ -1,12 +1,14 @@
 /**
- * lib/api.ts â€” AUTOMATA typed API client
+ * lib/api.ts — AUTOMATA typed API client
  *
  * Owns:    All HTTP and WebSocket communication between the React frontend
  *          and the Python FastAPI backend.
  * Never:   Must not contain UI logic. Must not talk directly to CockroachDB
- *          or Bedrock â€” all backend calls go through this module.
+ *          or Bedrock — all backend calls go through this module.
  */
 
+
+import type { PermissionRequest } from "./permissions";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000").replace(/\/$/, "");
 
@@ -199,6 +201,7 @@ export interface ActionCard {
 }
 
 export interface ChatResponse {
+  needs_permission?: PermissionRequest;
   intent: string;
   confidence: number;
   reply: string;
@@ -279,7 +282,7 @@ export interface EndSessionResult {
 
 // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
+export async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const target = url.startsWith("http") ? url : `${API_BASE}${url}`;
   const res = await fetch(target, {
     headers: {
@@ -449,10 +452,10 @@ export async function getActivityFeed(projectId?: string, limit = 50): Promise<{
   return apiFetch<{ items: ActivityItem[] }>(`/activity/feed${suffix}`);
 }
 
-export async function sendChatMessage(message: string, projectId?: string, activeProjectId?: string, allowExecute = false): Promise<ChatResponse> {
+export async function sendChatMessage(message: string, projectId?: string, activeProjectId?: string, allowExecute = false, permissionId?: string): Promise<ChatResponse> {
   return apiFetch<ChatResponse>("/chat", {
     method: "POST",
-    body: JSON.stringify({ message, project_id: projectId || null, active_project_id: activeProjectId || null, allow_execute: allowExecute }),
+    body: JSON.stringify({ message, project_id: projectId || null, active_project_id: activeProjectId || null, allow_execute: allowExecute, permission_id: permissionId }),
   });
 }
 
@@ -673,6 +676,7 @@ export interface SnapshotData {
 export interface Snapshot { id: number; project_id: string; created_at: number; reason: string; data: SnapshotData }
 
 export interface ResumeResult {
+  needs_permission?: PermissionRequest;
   success: boolean;
   partial?: boolean;
   error?: string;
@@ -793,8 +797,8 @@ export const takeSnapshot = (projectId: string) =>
   apiFetch<{ success: boolean; data: SnapshotData }>(`/projects/${projectId}/snapshot`, { method: "POST" });
 export const getLatestSnapshot = (projectId: string) =>
   apiFetch<{ snapshot: Snapshot | null }>(`/projects/${projectId}/snapshot`);
-export const resumeWorkspace = (projectId: string, opts: { open_editor?: boolean; open_terminal?: boolean; start_servers?: boolean } = {}) =>
-  apiFetch<ResumeResult>(`/projects/${projectId}/resume`, { method: "POST", body: JSON.stringify(opts) });
+export const resumeWorkspace = (projectId: string, opts: { open_editor?: boolean; open_terminal?: boolean; start_servers?: boolean } = {}, permissionId?: string) =>
+  apiFetch<ResumeResult>(`/projects/${projectId}/resume`, { method: "POST", body: JSON.stringify({ ...opts, permission_id: permissionId }) });
 export const getProjectProfile = (projectId: string, refresh = false) =>
   apiFetch<ProjectProfile>(`/projects/${projectId}/profile${refresh ? "?refresh=true" : ""}`);
 
@@ -861,7 +865,7 @@ export class AgentSocket {
     };
 
     this.ws.onclose = () => {
-      console.info("[AgentSocket] Disconnected â€” will not auto-reconnect in Phase 0");
+      console.info("[AgentSocket] Disconnected — will not auto-reconnect in Phase 0");
     };
 
     this.ws.onerror = (err) => {
@@ -901,20 +905,21 @@ export interface NowPlaying {
   error?: string;
 }
 export interface AssistReply {
+  needs_permission?: PermissionRequest;
   handled_by: "assist" | "chat";
   intent: string;
   reply: string;
   success: boolean;
 }
 /** Work bar command: quick actions run locally, anything else goes to chat. */
-export const runAssist = (text: string, projectId?: string) =>
-  apiFetch<AssistReply>("/assist", { method: "POST", body: JSON.stringify({ text, project_id: projectId }) });
+export const runAssist = (text: string, projectId?: string, permissionId?: string) =>
+  apiFetch<AssistReply>("/assist", { method: "POST", body: JSON.stringify({ text, project_id: projectId, permission_id: permissionId }) });
 export const getNowPlaying = () => apiFetch<NowPlaying>("/assist/now-playing");
-export const mediaControl = (action: "play_pause" | "next" | "previous" | "volume_up" | "volume_down" | "mute") =>
-  apiFetch<{ success: boolean; message?: string; error?: string; now_playing?: NowPlaying }>("/assist/media", {
-    method: "POST", body: JSON.stringify({ action }),
+export const mediaControl = (action: "play_pause" | "next" | "previous" | "volume_up" | "volume_down" | "mute", permissionId?: string) =>
+  apiFetch<{ success: boolean; message?: string; error?: string; now_playing?: NowPlaying; needs_permission?: PermissionRequest }>("/assist/media", {
+    method: "POST", body: JSON.stringify({ action, permission_id: permissionId }),
   });
-/** OCR the window you're looking at and answer â€” only runs when called. */
-export const readScreen = (question?: string) =>
-  apiFetch<{ success: boolean; answer?: string; error?: string; window?: { title: string; exe: string } }>(
-    "/assist/screen", { method: "POST", body: JSON.stringify({ question: question ?? "" }) });
+/** OCR the window you're looking at and answer — only runs when called. */
+export const readScreen = (question?: string, permissionId?: string) =>
+  apiFetch<{ success: boolean; answer?: string; error?: string; window?: { title: string; exe: string }; needs_permission?: PermissionRequest }>(
+    "/assist/screen", { method: "POST", body: JSON.stringify({ question: question ?? "", permission_id: permissionId }) });

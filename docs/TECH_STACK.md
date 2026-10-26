@@ -1,90 +1,58 @@
-# Technology and configuration
+# Technology stack
 
-This file records the runtime and dependency sources used by the repository.
-Version ranges in manifests are authoritative; lock files pin resolved
-versions for reproducible installs.
+Version ranges in the manifests are authoritative; lockfiles (`backend/uv.lock`,
+`frontend/package-lock.json`, `frontend/src-tauri/Cargo.lock`) pin resolved
+versions for reproducible installs. Versions below are the locked ones at the
+last audit (2026-10-26).
 
-## Frontend and desktop
+## Agent (backend)
 
-- React 19, TypeScript, Vite, Framer Motion, Recharts and lucide-react.
-- Secondary screens are lazy-loaded; the chart library downloads only when a
-  chart screen opens. Polling uses `src/lib/usePolling.ts`, which pauses
-  while the window is hidden.
-- Tauri 2 desktop shell under `frontend/src-tauri/` with `tray-icon`,
-  `tauri-plugin-autostart`, `tauri-plugin-single-instance`,
-  `tauri-plugin-notification`, `tauri-plugin-global-shortcut` (Alt+Space, Ctrl+Alt+A).
-  JS side: `@tauri-apps/api`, `@tauri-apps/plugin-autostart`,
-  `@tauri-apps/plugin-notification` (loaded lazily via `src/lib/desktop.ts`).
-- npm and `frontend/package-lock.json`.
-- HTTP/WebSocket access to FastAPI through `frontend/src/lib/api.ts`.
+| Area | Choice | Notes |
+| --- | --- | --- |
+| Runtime | Python 3.12, managed with **uv** | `backend/pyproject.toml` |
+| API | FastAPI 0.139, Uvicorn 0.51 | Binds `127.0.0.1:8000`; guarded by `security/http_guard.py` |
+| Local memory | SQLite (stdlib) with FTS5 | `memory.db`, `tasks.db`, `usage.db`; optional float32 vectors |
+| Cloud memory (optional) | CockroachDB via SQLAlchemy 2.0 + psycopg2 | `VECTOR(1024)` columns, `db/schema.sql` |
+| Activity capture | watchdog 6, GitPython 3.2.1 | Generated folders (`node_modules`, `.venv`, `.git`, `dist`, `target`) ignored |
+| Desktop control | ctypes Win32, comtypes 1.4 (UI Automation), Windows.Media.Ocr via PowerShell | Verified actions only |
+| Monitoring | psutil 7, nvidia-ml-py 13 (NVML) | Non-NVIDIA GPUs report "unavailable" |
+| Secrets | keyring 25 → Windows Credential Manager | Needs inbox values |
+| Models | Groq, OpenRouter, Gemini, Cohere, NVIDIA, MiniMax, Amazon Bedrock (boto3), Ollama | All calls in `ai/bedrock_client.py`; offline → Ollama |
+| Offline embeddings (optional) | fastembed (`--extra local-ai`) | Or Ollama `nomic-embed-text` |
+| Tests and quality | pytest 8, ruff, bandit, pip-audit, detect-secrets, pre-commit | `--extra dev` |
 
-## Backend
+## UI (frontend)
 
-- Python 3.12+, FastAPI, and Uvicorn.
-- `uv` with `backend/pyproject.toml` and `backend/uv.lock`.
-- SQLAlchemy + psycopg2 for CockroachDB.
-- Watchdog and GitPython for activity capture (generated folders such as
-  `node_modules`, `.venv`, `.git`, `dist`, `target` are ignored).
-- psutil for host metrics and process names; nvidia-ml-py (NVML) for NVIDIA
-  GPU metrics. Other GPUs report "unavailable".
-- SQLite (standard library) for local app-usage history.
-- pytest for backend tests; Ruff is configured in the backend manifest.
+| Area | Choice |
+| --- | --- |
+| Framework | React 19, TypeScript 6, Vite 8.3 |
+| Styling | Tailwind CSS 4, CSS design tokens (`src/styles/globals.css`) |
+| Motion and charts | Framer Motion 12, Recharts 3 (loaded only on chart screens) |
+| Icons | lucide-react |
+| Tests and lint | Vitest 4.1.12, Testing Library, oxlint |
 
-## Data and model providers
+## Desktop shell
 
-- CockroachDB is the structured memory store and supports the `VECTOR(1024)`
-  columns in `backend/db/schema.sql`.
-- `backend/ai/bedrock_client.py` owns supported reasoning/embedding provider
-  calls and fallback behavior.
-- Ollama is supported for local reasoning/embeddings. Cloud provider support
-  is optional and depends on environment configuration.
-- Use compatible embedding models and dimensions for both write and query
-  paths; see `DATABASE_SCHEMA.md`.
+| Area | Choice |
+| --- | --- |
+| Shell | Tauri 2 (Rust stable), WebView2 |
+| Plugins | tray-icon, single-instance, autostart, notification, global-shortcut, log |
+| Windows integration | webview2-com 0.39 (keyboard focus for the work bar) |
+| Security | Strict Content Security Policy in `tauri.conf.json`; minimal capabilities |
 
-## OS and integrations
+## Configuration
 
-- Windows is the supported automation target.
-- Automation uses Python/PowerShell and Windows facilities for process,
-  clipboard, window, screen-capture, and credential-store operations.
-- OCR support depends on the configured/installed OCR path.
-- External app or model integrations are optional and should be treated as
-  external data-sharing boundaries.
-
-## Environment variables
-
-Backend configuration is loaded from `backend/.env` (if present) and the
-process environment. Start from `backend/.env.example`; keep real values out
-of source control.
+Loaded from `backend/.env` (git-ignored) and the process environment. Every
+setting is optional; `backend/.env.example` documents each one.
 
 | Variable | Purpose |
 | --- | --- |
-| `COCKROACHDB_CONNECTION_STRING` | CockroachDB connection |
-| `REASONING_MODE` | `auto`, `local`, or `cloud` reasoning selection |
-| `OLLAMA_BASE_URL` | Ollama service URL |
-| `OLLAMA_MODEL` | Local reasoning model |
-| `OLLAMA_EMBEDDING_MODEL` | Local embedding model |
-| `AWS_REGION`, `AWS_BEDROCK_MODEL_ID` | Optional Bedrock configuration |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | Optional AWS credentials; prefer managed credentials when available |
-| `GROQ_API_KEY`, `GROQ_EMBEDDING_API_KEY` | Optional Groq reasoning/embedding credentials |
-| `GEMINI_API_KEY` | Optional Gemini credential |
-| `NVIDIA_API_KEY` | Optional NVIDIA credential |
-| `MINIMAX_API_KEY` | Optional MiniMax credential |
-| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | Optional OpenRouter configuration |
-| `COHERE_API_KEY` | Optional Cohere credential |
-| `EMBEDDING_MODEL_ID`, `EMBEDDING_DIMENSION` | Optional explicit embedding configuration |
+| `COCKROACHDB_CONNECTION_STRING` | Cloud copy of memory |
+| `REASONING_MODE` | `auto` (cloud → Bedrock → Ollama), `local`, `cloud` |
+| `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_EMBEDDING_MODEL`, `OLLAMA_MODELS` | Local models (URL must be http/https) |
+| `GROQ_API_KEY`, `GROQ_EMBEDDING_API_KEY`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `GEMINI_API_KEY`, `COHERE_API_KEY`, `NVIDIA_API_KEY`, `MINIMAX_API_KEY` | Cloud providers |
+| `AWS_REGION`, `AWS_BEDROCK_MODEL_ID`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | Amazon Bedrock |
+| `EMBEDDING_MODEL_ID`, `EMBEDDING_DIMENSION` | Cloud embedding model (dimension must match the schema) |
 | `LOG_LEVEL` | Python log level |
 
-`API_KEY` is read by configuration code but is not evidence that the FastAPI
-routes enforce authentication. Treat the current service as a trusted local
-development process; see `docs/SECURITY.md`.
-
-## Smart-workspace additions
-
-- **SQLite** (stdlib, FTS5) for local memory, tasks and usage.
-- **comtypes** for Windows UI Automation (`automation/uia.py`).
-- **Windows.Media.Ocr** through `automation/windows_ocr.ps1` (no extra install).
-- **keyring** for Windows Credential Manager (Needs inbox).
-- **Ollama** (optional, user-installed) for offline chat/embeddings;
-  recommended `qwen2.5-coder:3b` + `nomic-embed-text` on a 4 GB GPU.
-- **fastembed** (optional extra `local-ai`) for offline embeddings without Ollama.
-- **Rust stable** to build the desktop shell.
+Runtime flags (`AUTOMATA_*`, `VITE_*`): see [DEVELOPMENT.md](DEVELOPMENT.md#configuration).

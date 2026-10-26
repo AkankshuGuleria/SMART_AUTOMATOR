@@ -56,17 +56,24 @@ def test_resume_reports_each_step_and_skips_running_servers(store, tmp_path, mon
     }, "idle")
     launched = []
     monkeypatch.setattr(snapshot.subprocess, "Popen", lambda *a, **k: launched.append(a[0]))
-    monkeypatch.setattr("shutil.which", lambda cmd: "C:/bin/code.cmd" if cmd == "code" else None)
+    monkeypatch.setattr("automation.os_windows.resolve_executable",
+                        lambda cmd: "C:/Programs/Antigravity IDE.exe" if cmd == "antigravity-ide" else None)
+    # The user last worked on this project in Antigravity IDE (usage history).
+    monkeypatch.setattr(snapshot, "last_editor", lambda pid, repo: {
+        "app": "Antigravity IDE", "folder": str(tmp_path), "seen_at": 1.0, "source": "usage history"})
     monkeypatch.setattr("automation.os_windows.open_terminal", lambda cwd="": True)
     monkeypatch.setattr(snapshot, "_dev_servers", lambda repo: [{"port": 5173}])  # already running
 
-    res = client.post("/projects/p1/resume", json={}).json()
+    first = client.post("/projects/p1/resume", json={}).json()
+    req = first["needs_permission"]  # asks before opening anything
+    assert req["category"] == "workspace" and "open Antigravity IDE" in req["action"] and launched == []
+    res = client.post("/projects/p1/resume", json={"permission_id": req["id"]}).json()
     steps = {s["step"]: s for s in res["steps"]}
     assert res["success"] is True
-    assert steps["editor"]["status"] == "ok"
+    assert steps["editor"]["status"] == "ok" and steps["editor"]["app"] == "Antigravity IDE"
     assert steps["terminal"]["status"] == "ok"
     assert steps["dev_server"]["status"] == "skipped"
-    assert launched == [["C:/bin/code.cmd", "-r", str(tmp_path)]]
+    assert launched == [["C:/Programs/Antigravity IDE.exe", str(tmp_path)]]  # not VS Code
     assert res["summary"]["open_todos"] == ["TODO: x"]
 
 

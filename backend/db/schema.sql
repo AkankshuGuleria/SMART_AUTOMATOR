@@ -189,7 +189,7 @@ CREATE TABLE IF NOT EXISTS mistake_log (
 );
 
 -- ─── workflow_runs ──────────────────────────────────────────────────
--- Workflow execution instances. See FEATURES_PHASE.md, WORKFLOW_ENGINE.md.
+-- Workflow execution instances. See docs/ACTION_POLICIES.md, docs/WORKFLOW_ENGINE.md.
 CREATE TABLE IF NOT EXISTS workflow_runs (
     id              TEXT        PRIMARY KEY,
     workflow_id     TEXT        NOT NULL,

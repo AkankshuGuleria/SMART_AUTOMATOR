@@ -3,23 +3,28 @@
 ## 1. System overview
 
 ```text
-Tauri desktop shell (tray, autostart, single instance, backend supervisor)
-  └─ React UI  ──HTTP/WebSocket (127.0.0.1:8000)──►  FastAPI agent
-                                                     │
+Tauri desktop shell (tray, autostart, single instance, agent supervisor, work-bar shortcut, CSP)
+  ├─ React UI (main window)  ─┐
+  └─ AI work bar (Alt+Space) ─┴─HTTP/WebSocket (127.0.0.1:8000)──►  FastAPI agent
+                                                                     │
+   security/ ───────── http_guard (local-only API) · permissions (ask before PC control) · defender
    memory/ ─────────── capture → local_store (SQLite, offline) ◄─sync─ db/ (CockroachDB, optional)
    workspace/ ──────── active project, session snapshots, resume
    intelligence/ ───── project profile (stack, run book, env, modules)
    ai/ ─────────────── model router: cloud providers → Bedrock → Ollama (offline)
    decision_engine/ ── chat intents → planner (policies) → tools
    tasks/ ──────────── delegation tasks with approval gates, Needs inbox
-   automation/ ─────── verified desktop control (desktop.py, win32, uia, ocr), agent bridge
+   automation/ ─────── verified desktop control (desktop.py, win32, uia, ocr), chat-app hand-off
+   assist/ ─────────── work bar commands: media, Spotify, web search, screen reading
    workflow_engine/ ── checkpointed YAML workflows
    monitoring/ ─────── system metrics, app-usage tracking
 ```
 
-The frontend is a presentation and interaction layer. The Python backend
-coordinates application behavior and is the only application layer that
-accesses CockroachDB or reasoning providers.
+The frontend is a presentation and interaction layer. The Python agent
+coordinates application behaviour and is the only layer that touches the
+databases, model providers or the desktop. Every request passes the local-only
+guard first, and every action that controls the PC passes the permission check
+(§3.6b).
 
 ## 2. Runtime lifecycle
 
@@ -52,7 +57,7 @@ and app-usage routes. Routes that touch the database, git, OS or a model
 provider are plain `def` handlers so FastAPI runs them in its threadpool; a
 slow model call never blocks other requests.
 It also publishes WebSocket events used for live activity and action progress.
-The API reference is in [docs/API_REFERENCE.md](docs/API_REFERENCE.md).
+The API reference is in [API_REFERENCE.md](API_REFERENCE.md).
 
 ### 3.3 Persistent memory
 
@@ -98,10 +103,30 @@ UI Automation (pressing Ctrl+L if the panel is closed) → refuse if it holds a
 draft → `SetFocus` → paste → read back through the UIA Text pattern (OCR
 fallback) → only when allowed press Enter and confirm the box emptied.
 
+The `kilo` recipe drives the Kilo Code extension inside Antigravity IDE: its box
+is named "Type a message, @ to mention files…", distinct from Antigravity's own
+"Message input" in the same window. The panel is opened by selecting Kilo's
+activity-bar tab through UI Automation (works whatever has focus), falling back
+to Ctrl+1 then Ctrl+Shift+A, retried for up to 20 s while a fresh window loads
+its extensions. Kilo folds long pastes into a "[Pasted ~N lines]" chip, which
+counts as delivered when N matches the prompt. `agent_busy()` reads Kilo's
+session tab (◔ working / ✓ done) so the task's watch step keeps waiting while
+the agent works instead of stopping after 90 quiet seconds.
+
 `automation/no_console.py` patches `subprocess.Popen` at startup so every child
 process gets `CREATE_NO_WINDOW` unless it asks for `CREATE_NEW_CONSOLE` (terminal,
 installer, dev servers). The agent runs windowless (`pythonw`), so without this
 each PowerShell/git/CLI call flashed a console window over the user's work.
+
+### 3.6b Security layer
+
+`security/permissions.py` — per-category consent (ask / always allow) and
+server-issued single-use approvals for every action that controls the PC; the
+planner maps its action types to categories (`effective_policy`).
+`security/http_guard.py` — ASGI middleware ahead of CORS: Host allow-list (DNS
+rebinding), Origin / fetch-metadata checks for browsers and WebSockets, body
+size limit. `security/defender.py` — reads Defender's Controlled Folder Access
+events to explain blocks (never changes settings). Details: SECURITY_AUDIT.md.
 
 ### 3.6a Work bar and quick assist
 
@@ -115,7 +140,9 @@ Automation and confirms the player switched to Pause. `assist/screen.py`
 captures the front-most non-AUTOMATA window with `PrintWindow` (correct even
 when the bar covers it), OCRs it, deletes the image and sends only redacted text
 to the model, and only when the user asks. The Tauri shell registers Alt+Space
-and Ctrl+Alt+A (toggle on key-down only), places the frameless, transparent bar
+the user's shortcut (default Alt+Space, saved in `%APPDATA%\com.automata.dev\workbar.json`,
+changeable via the `set_workbar_shortcut` command; Kilo/editor keys are refused;
+toggle on key-down only), places the frameless, transparent bar
 at the top centre of the cursor's monitor and hides it on blur.
 
 ### 3.7 Workflow engine

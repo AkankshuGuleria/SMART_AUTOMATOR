@@ -42,7 +42,9 @@ _last_llm_fail_time: float = 0.0
 def _ollama_url() -> str:
     from config import settings
 
-    return getattr(settings, "ollama_base_url", "") or "http://localhost:11434"
+    url = (getattr(settings, "ollama_base_url", "") or "").strip().rstrip("/")
+    # Only http(s): urllib would also follow file:// or custom schemes from a bad setting.
+    return url if url.lower().startswith(("http://", "https://")) else "http://localhost:11434"
 
 
 def _ollama_chat_model() -> str:
@@ -1128,8 +1130,9 @@ def _fastembed_embed(texts: list[str]) -> list[list[float]] | None:
         from fastembed import TextEmbedding
 
         if _fastembed_model is None:
-            from config import data_dir
             import os
+
+            from config import data_dir
 
             _fastembed_model = TextEmbedding(
                 FASTEMBED_MODEL_NAME, cache_dir=os.path.join(data_dir(), "models")

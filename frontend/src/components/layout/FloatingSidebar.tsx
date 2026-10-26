@@ -8,9 +8,10 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, MessageSquare, Activity, Brain,
   Folder, Settings, ChevronRight,
-  Cpu, Sun, Moon, RefreshCw, Zap, ListChecks, Inbox, ShieldCheck,
+  Cpu, Sun, Moon, RefreshCw, Zap, ListChecks, Inbox, ShieldCheck, PanelTop,
 } from 'lucide-react'
 import AIStatusBadge from '../ui/AIStatusBadge'
+import { isTauri, toggleWorkbar } from '../../lib/desktop'
 import type { Screen } from '../../lib/screens'
 
 interface SidebarProps {
@@ -162,6 +163,8 @@ export default function FloatingSidebar({
             <motion.button
               key={item.id}
               onClick={() => onNavigate(item.id)}
+              aria-label={item.label}
+              aria-current={isActive ? 'page' : undefined}
               whileHover={{ x: 2 }}
               whileTap={{ scale: 0.96 }}
               transition={{ type: 'spring', stiffness: 400, damping: 25 }}
@@ -258,9 +261,34 @@ export default function FloatingSidebar({
           )}
         </AnimatePresence>
 
+        {/* AI work bar (desktop app) */}
+        {isTauri() && (
+          <motion.button
+            onClick={() => toggleWorkbar()}
+            whileTap={{ scale: 0.94 }}
+            aria-label="Open the AI work bar"
+            title="Open the AI work bar (shortcut in Settings)"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 12, padding: '9px 16px', border: 'none', cursor: 'pointer',
+              background: 'transparent', color: 'var(--accent-2)', width: '100%', overflow: 'hidden',
+            }}
+          >
+            <PanelTop size={18} strokeWidth={1.8} />
+            <AnimatePresence>
+              {isExpanded && (
+                <motion.span initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -6 }}
+                  transition={{ duration: 0.14 }} style={{ fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
+                  Work bar
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </motion.button>
+        )}
+
         {/* Theme toggle */}
         <motion.button
           onClick={onThemeToggle}
+          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           whileTap={{ scale: 0.94 }}
           style={{
             display: 'flex',

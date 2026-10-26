@@ -14,6 +14,37 @@ from fastapi import APIRouter, Body, HTTPException
 router = APIRouter()
 
 
+def _gate(category: str, action: str, body: dict | None) -> dict | None:
+    """None when the action may run; else the permission request for the UI to show."""
+    from security.permissions import check
+
+    request = check(category, action, (body or {}).get("permission_id"))
+    return None if request is None else {"success": False, "needs_permission": request,
+                                         "error": f"Permission needed: {request['label']}"}
+
+
+# ─── Permissions ─────────────────────────────────────────────────────────────
+
+
+@router.get("/permissions", tags=["security"])
+def list_permissions() -> dict:
+    """What AUTOMATA may do without asking (per category: ask | allow)."""
+    from security.permissions import get_policies
+
+    return {"permissions": get_policies()}
+
+
+@router.post("/permissions", tags=["security"])
+def set_permission(body: dict = Body(...)) -> dict:
+    """{category, mode: ask|allow} — e.g. always allow music control."""
+    from security.permissions import set_policy
+
+    try:
+        return set_policy(str(body.get("category", "")), str(body.get("mode", "")))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 def _bool(body: dict, key: str) -> bool:
     value = body.get(key)
     if not isinstance(value, bool):
@@ -164,6 +195,12 @@ def resume_project(project_id: str, body: dict | None = Body(None)) -> dict:
     from workspace.snapshot import resume
 
     opts = body or {}
+    from memory.local_store import get_store
+    from workspace.snapshot import describe_resume
+
+    has_snapshot = get_store().latest_snapshot(project_id) is not None
+    if has_snapshot and (gate := _gate("workspace", describe_resume(project_id, opts), opts)):
+        return {**gate, "steps": []}
     return resume(
         project_id,
         open_editor=bool(opts.get("open_editor", True)),
@@ -209,14 +246,15 @@ def assist(body: dict = Body(...)) -> dict:
     text = str(body.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=422, detail="text is required")
-    quick = run(text, body.get("project_id"))
+    quick = run(text, body.get("project_id"), body.get("permission_id"))
     if quick is not None:
         return {"handled_by": "assist", **quick}
     from api.server import chat
 
     reply = chat({"message": text, "project_id": body.get("project_id")})
+    pending = [a for a in reply.get("actions", []) if not a.get("executed") and a.get("permission")]
     return {"handled_by": "chat", "intent": reply.get("intent"), "reply": reply.get("reply"),
-            "success": not reply.get("error")}
+            "success": not reply.get("error"), "pending_actions": pending}
 
 
 @router.get("/assist/now-playing", tags=["assist"])
@@ -229,16 +267,24 @@ def assist_now_playing() -> dict:
 @router.post("/assist/media", tags=["assist"])
 def assist_media(body: dict = Body(...)) -> dict:
     """{action: play_pause|next|previous|volume_up|volume_down|mute} — system media keys."""
+    from assist.commands import describe
     from assist.media import control
 
-    return control(str(body.get("action") or ""))
+    action = str(body.get("action") or "")
+    name = {"play_pause": "resume"}.get(action, action)
+    if gate := _gate("media", describe(name, {}), body):
+        return gate
+    return control(action)
 
 
 @router.post("/assist/screen", tags=["assist"])
 def assist_screen(body: dict = Body(default={})) -> dict:
     """{question?, app?} — OCR the window you are looking at and answer. Only runs when called."""
+    from assist.commands import describe
     from assist.screen import analyze
 
+    if gate := _gate("screen", describe("screen", {}), body):
+        return gate
     return analyze(str(body.get("question") or ""), body.get("app") or None)
 
 
@@ -263,21 +309,30 @@ def desktop_tabs(app: str = "browser") -> dict:
 def desktop_switch_tab(body: dict = Body(...)) -> dict:
     from automation.desktop import switch_tab
 
-    return switch_tab(str(body.get("title", "")), str(body.get("app") or "browser"))
+    title, app = str(body.get("title", "")), str(body.get("app") or "browser")
+    if gate := _gate("app_control", f"Switch {app} to the “{title}” tab", body):
+        return gate
+    return switch_tab(title, app)
 
 
 @router.post("/desktop/focus", tags=["desktop"])
 def desktop_focus(body: dict = Body(...)) -> dict:
     from automation.desktop import focus
 
-    return focus(str(body.get("app", "")), body.get("title_hint"))
+    app = str(body.get("app", ""))
+    if gate := _gate("app_control", f"Bring {app} to the front", body):
+        return gate
+    return focus(app, body.get("title_hint"))
 
 
 @router.post("/desktop/type", tags=["desktop"])
 def desktop_type(body: dict = Body(...)) -> dict:
     from automation.desktop import type_text
 
-    return type_text(str(body.get("text", "")), str(body.get("app") or "") or None)
+    text, app = str(body.get("text", "")), str(body.get("app") or "") or None
+    if gate := _gate("app_control", f"Type {len(text)} characters into {app or 'the active window'}", body):
+        return gate
+    return type_text(text, app)
 
 
 @router.post("/desktop/read", tags=["desktop"])
@@ -286,6 +341,8 @@ def desktop_read(body: dict | None = Body(None)) -> dict:
     from automation.desktop import read_screen
 
     opts = body or {}
+    if gate := _gate("screen", f"Read the text on {opts.get('app') or 'the screen'}", opts):
+        return gate
     return read_screen(
         expected_text=opts.get("expected_text"),
         region=opts.get("region"),
@@ -450,4 +507,17 @@ def self_check() -> dict:
         "Turn on 'Start at sign-in' in Settings so the agent is always running.", "info")
     free = round(shutil.disk_usage(data_dir()).free / 2**30, 1)
     add("disk", "Free disk (data folder)", free >= 2, f"{free} GB free", "Free up disk space.", "warning")
+    from security.defender import summary as defender_summary
+
+    blocked = defender_summary(7)["blocked_apps"]
+    names = ", ".join(f"{b['app']} ({b['count']}×)" for b in blocked[:5])
+    add("defender", "Windows Defender blocks (7 days)", not blocked,
+        "None" if not blocked else f"Controlled folder access blocked: {names}",
+        "These popups come from Windows, not AUTOMATA. If you trust the app, allow it: "
+        "Windows Security → Ransomware protection → Allow an app through Controlled folder access.", "info")
+    from security.permissions import get_policies
+
+    always = [p["label"] for p in get_policies() if p["mode"] == "allow"]
+    add("permissions", "Permissions", True,
+        "Asks before every PC action" if not always else "Always allowed: " + ", ".join(always), None, "info")
     return {"ok": all(c["ok"] or c["level"] != "error" for c in checks), "checks": checks}

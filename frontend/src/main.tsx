@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './styles/globals.css'
 import App from './App.tsx'
 
-// The AI work bar (Alt+Space / Ctrl+Alt+A) loads index.html#companion.
+// The AI work bar (Alt+Space, changeable in Settings) loads index.html#companion.
 // eslint-disable-next-line react/only-export-components
 const CompanionApp = lazy(() => import('./CompanionApp.tsx'))
 const isCompanion = window.location.hash === '#companion'

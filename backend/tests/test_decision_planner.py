@@ -7,17 +7,15 @@ wired into triggers. All external services are mocked.
 
 from unittest.mock import patch
 
-
 from decision_engine.planner import (
-    plan,
     _build_brief_payload,
     _execute_flag_related_todos,
     _execute_regenerate_daily_brief,
     _execute_store_session_summary,
     _execute_suggest_next_task,
     _execute_update_project_summary,
+    plan,
 )
-
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -12,10 +12,37 @@ Ref:     ROADMAP.md Phase 4, PROJECT.md §4 (Agent Actions).
 from __future__ import annotations
 
 import logging
+import re
+import time
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _wait_for_app_window(app: str, timeout: float = 12.0) -> str | None:
+    """Title of the launched app's window once it appears, else None."""
+    import os
+
+    from automation import win32
+    from automation.os_windows import resolve_executable
+
+    if not win32.IS_WINDOWS:
+        return None
+    path = resolve_executable(app) or app
+    exe = os.path.basename(path).lower()
+    if exe.endswith((".cmd", ".bat")):  # launcher script: the GUI exe has the app's name
+        exe = os.path.splitext(exe)[0] + ".exe"
+    if not exe.endswith(".exe"):
+        exe += ".exe"
+    names = {exe, exe.replace("-", " ")}  # antigravity-ide.exe → "antigravity ide.exe"
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        for w in win32.top_level_windows():
+            if w.exe.lower() in names and w.title:
+                return w.title
+        time.sleep(0.5)
+    return None
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -72,6 +99,12 @@ _APP_NAME_MAP: dict[str, str] = {
     "vs-code": "code",
     "code": "code",
     "visual studio code": "code",
+    "antigravity": "antigravity-ide",
+    "antigravity ide": "antigravity-ide",
+    "antigravity app": "antigravity",
+    "kilo code": "antigravity-ide",  # Kilo Code runs inside Antigravity IDE here
+    "kilo": "antigravity-ide",
+    "cursor": "cursor",
     "intellij": "idea64",
     "intellij idea": "idea64",
     "idea": "idea64",
@@ -221,18 +254,28 @@ def _resolve_app_target(raw: str) -> tuple[str, str]:
             lowered = raw.lower()
             break
 
+    # Only the app phrase: "antigravity and use kilo code to …" → "antigravity".
+    # Otherwise a word later in the sentence ("kilo *code*") picks the wrong app.
+    head = re.split(r"\s+(?:and|then|to|so|for|with|,)\s+|,", lowered, maxsplit=1)[0].strip()
+    if head and head != lowered:
+        raw, lowered = raw[: len(head)], head
+
     # Check fuzzy aliases first (e.g. "chat gpt" → "chatgpt")
     for alias, canonical in _FUZZY_ALIASES.items():
-        if alias in lowered:
+        if re.search(rf"\b{re.escape(alias)}\b", lowered):
             lowered = lowered.replace(alias, canonical)
             raw = raw.replace(alias, canonical)
             break
 
-    # Check map first (longest keys first to avoid partial matches)
-    for key in sorted(_APP_NAME_MAP.keys(), key=len, reverse=True):
-        if key in lowered:
-            target = _APP_NAME_MAP[key]
-            return ("url" if target.startswith("http") else "app"), target or raw
+    # Whole-word matches only; the earliest app named wins, then the longest name.
+    best: tuple[int, int, str] | None = None
+    for key, target in _APP_NAME_MAP.items():
+        m = re.search(rf"(?<![\w-]){re.escape(key)}(?![\w-])", lowered)
+        if m and (best is None or (m.start(), -len(key)) < (best[0], best[1])):
+            best = (m.start(), -len(key), target)
+    if best is not None:
+        target = best[2]
+        return ("url" if target.startswith("http") else "app"), target or raw
 
     # If it looks like a URL (has a dot and no spaces, or starts with http/www)
     if raw.startswith(("http://", "https://", "www.")):
@@ -282,11 +325,20 @@ def open_app_or_url(target: str) -> dict[str, Any]:
     # Exact app match
     app_success = launch_app(resolved)
     if app_success:
+        title = _wait_for_app_window(resolved)
+        from security.defender import explain_block
+
+        blocked = explain_block(resolved.split("-")[0], seconds=30)
+        message = (f"Opened {title}." if title else
+                   f"Started {resolved}, but no window has appeared yet — it may still be loading.")
         return {
             "action": "open_app",
             "target": resolved,
             "success": True,
-            "message": f"Launched {resolved}.",
+            "verified": title is not None,
+            "window": title,
+            "defender": blocked,
+            "message": message + (f" Note: {blocked}" if blocked else ""),
         }
 
     # Exact launch failed — fall back to ambiguous search

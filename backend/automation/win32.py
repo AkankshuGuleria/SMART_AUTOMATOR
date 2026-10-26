@@ -270,10 +270,25 @@ def send_chord(chord: str) -> None:
     if input_disabled():
         raise PermissionError("Synthetic keyboard input is disabled (AUTOMATA_DISABLE_DESKTOP_INPUT)")
     keys = [VK[part] for part in chord.lower().split("+")]
+    # Real hardware scan codes: browsers/Electron derive KeyboardEvent.code from
+    # them, so without one an app sees the wrong (or no) key.
     for vk in keys:
-        user32.keybd_event(vk, 0, 0, None)
+        scan, flags = _scan(vk)
+        user32.keybd_event(vk, scan, flags, None)
     for vk in reversed(keys):
-        user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, None)
+        scan, flags = _scan(vk)
+        user32.keybd_event(vk, scan, flags | KEYEVENTF_KEYUP, None)
+
+
+# Keys that live on the extended part of the keyboard (arrows, nav block, media).
+_EXTENDED_VK = {0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, 0x5B,
+                0xAD, 0xAE, 0xAF, 0xB0, 0xB1, 0xB2, 0xB3}
+KEYEVENTF_EXTENDEDKEY = 0x0001
+
+
+def _scan(vk: int) -> tuple[int, int]:
+    scan = user32.MapVirtualKeyW(vk, 0) & 0xFF  # MAPVK_VK_TO_VSC
+    return scan, (KEYEVENTF_EXTENDEDKEY if vk in _EXTENDED_VK else 0)
 
 
 # ─── capture ─────────────────────────────────────────────────────────────────

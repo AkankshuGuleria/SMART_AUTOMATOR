@@ -1,3 +1,5 @@
+> **Historical document** — the original smart-workspace plan, kept for context. Current status: [PROJECT_STATUS.md](../PROJECT_STATUS.md); current security: [SECURITY_AUDIT.md](../SECURITY_AUDIT.md).
+
 # SMART_AUTOMATOR — smart workspace update plan
 
 > **Status (2026-10-26): Phases 0–5 implemented and verified** — see

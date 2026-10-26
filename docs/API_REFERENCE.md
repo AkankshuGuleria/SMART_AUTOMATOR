@@ -122,6 +122,8 @@ multi-user authentication/authorization boundary.
 | `GET` | `/tasks`, `/tasks/{id}` | List / detail (steps, outputs, needs) |
 | `POST` | `/tasks/{id}/answer` | `{answers: {folder, stack, features, style, extra, q1...}}` answer the clarify questions; `{}` = defaults; 422 for a relative path or missing drive |
 | `POST` | `/tasks/{id}/approve`, `/tasks/{id}/cancel` | Release the waiting step / cancel |
+| `GET` | `/permissions` | Per category (`app_control`, `media`, `launch`, `screen`, `workspace`, `system`): `ask` or `allow`, with label and help |
+| `POST` | `/permissions` | `{category, mode: ask\|allow}` |
 | `POST` | `/assist` | `{text, project_id?}` work bar: quick command (media, Spotify, search, screen) or falls back to `/chat`; returns `{handled_by, intent, reply, success}` |
 | `GET` | `/assist/now-playing` | Current media session `{title, artist, app, status, playing}` |
 | `POST` | `/assist/media` | `{action: play_pause\|next\|previous\|volume_up\|volume_down\|mute}` system media keys |
@@ -139,3 +141,20 @@ status `waiting_input` means the task waits for answers to its questions.
 
 New chat intents: `delegate_task` ("using antigravity build …"), `switch_tab`,
 `type_text` ("type 'x' into notepad"), `list_windows`.
+
+
+## Permissions on actions that control the PC
+
+Routes that act on the PC (`/assist`, `/assist/media`, `/assist/screen`,
+`/desktop/focus|type|read|tabs/switch`, `/projects/{id}/resume`,
+`/projects/{id}/start-dev-environment`, `/execute/open_browser`,
+`/external-agents/{tool}/prompt`, `/cross-app/tasks`, `/commands/execute` with
+`allow_execute`, and quick commands in `/chat`) first answer
+`{"needs_permission": {id, category, label, help, action}}` unless the category
+is always allowed. Send the same request again with `"permission_id": "<id>"`
+after the user approves; an id works once, for that exact action, within 5
+minutes. Chat planner actions in these categories return `policy: confirm_once`
+plus `permission` / `permission_category`, executed via `/chat/approve-action`.
+
+All requests must come from `127.0.0.1`/`localhost` and, when a browser sends
+an `Origin`, from the AUTOMATA UI (see SECURITY.md → Local API guard).

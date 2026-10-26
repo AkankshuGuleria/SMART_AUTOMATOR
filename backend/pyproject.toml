@@ -14,7 +14,7 @@ dependencies = [
     # File watching (SKILLS.md §4 — background capture without blocking the API)
     "watchdog>=6.0.0",
     # Git integration (SKILLS.md §4 — GitPollerThread)
-    "gitpython>=3.1.0",
+    "gitpython>=3.2.1",            # >=3.2.1 fixes 23 published advisories
     # AWS SDK (Bedrock + S3)
     "boto3>=1.37.0",
     # Environment / config
@@ -78,13 +78,22 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "S"]   # added S = flake8-bandit (security checks)
+select = ["E", "F", "I", "UP", "B", "S"]   # S = flake8-bandit security rules
+# Each ignore below was reviewed in docs/SECURITY_AUDIT.md §4.
 ignore = [
-    "S101",  # assert statements are fine in tests
+    "E501",  # long lines: mostly prompts, messages and URLs that read worse wrapped
+    "S101",  # assert is used for invariants and tests
+    "S110",  # try/except/pass: best-effort desktop probes must never crash the agent
+    "S112",  # try/except/continue: same, inside discovery loops
+    "S603",  # subprocess with an argument list (no shell) is the safe form
+    "S606",  # os.startfile opens apps/files the user asked for
+    "S607",  # Windows tools (powershell, tasklist, git) are resolved from PATH
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S", "B"]   # relax security/bugbear in test files
+"tests/conftest.py" = ["E402"]  # test environment is set before app modules import
+"api/server.py" = ["E402"]  # logging and console hiding run before app imports
 "ai/bedrock_client.py" = ["S310"]  # intentional HTTP API calls to LLM services
 "automation/os_windows.py" = ["S603", "S607"]  # intentional subprocess calls for OS automation
 "memory/retrieval.py" = ["S608"]  # validated SQL construction

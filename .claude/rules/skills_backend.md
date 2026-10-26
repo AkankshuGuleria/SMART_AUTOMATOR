@@ -1,26 +1,20 @@
-# Backend Skill — AUTOMATA (SKILLS.md §4)
+# Backend skill — AUTOMATA
 
 ## When to use
-When building or modifying Memory Engine (`backend/memory/`), Reasoning Engine (`backend/ai/`), or Automation Layer (`backend/automation/`).
+Any change under `backend/` (agent, memory, reasoning, automation, tasks, assist, security).
+Start with `docs/AGENTS.md` (repo map and rules) and `docs/ARCHITECTURE.md`.
 
 ## Checklist
-- [ ] All CockroachDB writes: `backend/db/client.py` → `get_session()` only
-- [ ] All Bedrock calls: `backend/ai/bedrock_client.py` only
-- [ ] Long-running capture runs in daemon threads — never blocking FastAPI
-- [ ] Redact secrets before any CockroachDB write: call `memory.capture.redact_secrets()`
-- [ ] Idempotent writes: re-running capture must not create duplicate rows
-
-## Phase 1 task order (TASK-005 → TASK-014)
-1. DB connection (TASK-005) — confirm graceful degradation when connection string is missing
-2. Schema migration (TASK-006) — run `backend/db/schema.sql` against real cluster; update VECTOR(1024) dimension first
-3. Project tracking — `projects` CRUD (TASK-008)
-4. Session tracking — start/end in `sessions` table (TASK-009)
-5. File watcher — `FileWatcherThread` in `memory/capture.py` using `watchdog` (TASK-010)
-6. Git poller — `GitPollerThread` using `GitPython` (TASK-011)
-7. Terminal capture + `redact_secrets()` (TASK-012)
-8. TODO extraction from code comments (TASK-013)
-9. Architecture notes storage (TASK-014)
+- [ ] Model calls only through `backend/ai/bedrock_client.py` (timeouts + offline fallback)
+- [ ] Cloud DB only via `backend/db/client.py`; local memory only via `backend/memory/local_store.py`
+- [ ] Desktop effects only via `automation/desktop.py` / `automation/chat_apps.py`, verified after acting
+- [ ] Anything that controls the PC goes through `security/permissions.check()` (or a chat approval card)
+- [ ] Captured text passes `memory.capture.redact_secrets()` before it is stored or sent to a model
+- [ ] Writes are idempotent (re-running capture or sync adds no duplicate rows)
+- [ ] Long-running work runs in daemon threads, never blocking FastAPI handlers
+- [ ] New/changed endpoint → `docs/API_REFERENCE.md`; new table/store → `docs/DATABASE_SCHEMA.md`
 
 ## Failure modes to avoid
-- Blocking the agent on a slow Bedrock call — always have a timeout + fallback to raw memories
-- Storing full file contents — store change summaries only to avoid bloating storage
+- Reporting success because a command ran — confirm the effect
+- Storing file contents (store change summaries only)
+- Blocking on a slow model call — always time-box and fall back to raw memories

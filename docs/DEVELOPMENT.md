@@ -1,144 +1,133 @@
-# Development setup
+# Development guide
 
 ## Prerequisites
 
-- Windows 10/11 for the supported OS automation path.
-- Python 3.12+ and `uv`.
-- Node.js 20+ and npm.
-- A CockroachDB database with support for the schema's `VECTOR(1024)` columns.
-- Optional: Ollama with a reasoning model and embedding model, or configured
-  cloud provider credentials.
+| Tool | Version | Used for |
+| --- | --- | --- |
+| Windows | 10 / 11 | Desktop automation targets Windows |
+| Python + [uv](https://docs.astral.sh/uv/) | 3.12+ | Agent (`backend/`) |
+| Node.js + npm | 20+ | UI (`frontend/`) |
+| Rust (stable) | latest | Desktop app build (`frontend/src-tauri/`) only |
+| Ollama | optional | Offline models — Setup & health can install it |
+| CockroachDB | optional | Cloud copy of memory; local SQLite memory works without it |
 
-## Configure the backend
-
-From the repository root:
-
-```powershell
-Copy-Item backend\.env.example backend\.env
-```
-
-Edit `backend\.env` locally. Set `COCKROACHDB_CONNECTION_STRING` to a
-development/test database. Keep real credentials out of source control.
-See [the security guide](SECURITY.md) and `TECH_STACK.md` for supported
-configuration names.
-
-Install dependencies and start the API:
+## First run
 
 ```powershell
-Set-Location backend
-uv sync
-uv run python main.py
+git clone https://github.com/AkankshuGuleria/SMART_AUTOMATOR.git
+cd SMART_AUTOMATOR
+Copy-Item backend\.env.example backend\.env      # optional — every setting has a default
+cd backend;  uv sync --extra dev;  cd ..
+cd frontend; npm ci;               cd ..
+.\scripts\dev.ps1                               # agent + UI at http://localhost:5173
 ```
 
-The API binds to `127.0.0.1:8000`. Check `http://127.0.0.1:8000/health` and
-open `http://127.0.0.1:8000/docs` for the API reference.
+`scripts/dev.ps1` reuses an agent that already answers on `/health`, otherwise
+starts one with auto-reload in its own window (moving to a free port if 8000 is
+taken), then starts the UI. Flags: `-Desktop` runs the Tauri app in dev mode,
+`-BackendOnly` starts only the agent.
 
-If initializing a fresh database, use the canonical
-`backend/db/schema.sql` with a disposable development database. Do not run
-schema experiments against production data.
-
-## Configure and start the frontend
-
-In a second terminal:
+Manual equivalent:
 
 ```powershell
-Set-Location frontend
-npm ci
-npm run dev
+cd backend;  uv run python main.py         # agent on http://127.0.0.1:8000 (API docs: /docs)
+cd frontend; npm run dev                    # UI on http://localhost:5173
+cd frontend; npm run tauri dev              # or: the desktop app
 ```
 
-The default API base is `http://127.0.0.1:8000`. For a different local API
-address, configure `VITE_API_BASE` and `VITE_WS_BASE` before starting Vite.
-The convenience script `npm run dev:with-backend` also starts or reuses a
-local backend and sets these values.
+## Configuration
 
-## Desktop shell
+All settings live in `backend/.env` (git-ignored); see `backend/.env.example`
+for the full, commented list and [TECH_STACK.md](TECH_STACK.md#configuration).
+Nothing is required: without keys AUTOMATA uses local memory and, if installed,
+Ollama. Never put real values in tracked files — see [SECURITY.md](SECURITY.md).
 
-With frontend dependencies installed and the backend configured, run the
-Tauri development command from `frontend`:
-
-```powershell
-npm run tauri dev
-```
-
-Desktop behavior, global shortcuts, and Windows automation should be
-validated on the intended machine; browser-only development does not verify
-the desktop shell.
-
-## Tests and quality checks
-
-```powershell
-Set-Location backend
-uv sync --extra dev   # once: installs pytest/ruff into backend/.venv
-uv run pytest tests/ -v --tb=short
-```
-
-`tests/conftest.py` blanks every database and provider setting before the
-backend is imported, so tests never touch the real CockroachDB cluster or a
-paid model API even when `backend/.env` is filled in. It also disables the
-app-usage tracker (`AUTOMATA_DISABLE_USAGE_TRACKER=1`).
-
-```powershell
-Set-Location frontend
-npm test
-npm run build
-npm run lint
-```
-
-Tests must use mocks/fixtures for model services and OS effects. Integration
-tests requiring CockroachDB must use an explicitly provisioned local/test
-instance. See [the QA checklist](QA_CHECKLIST.md).
-
-## Background agent
-
-Settings → Background agent → **Start at sign-in** writes
-`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\AUTOMATA Agent.vbs`,
-which starts `backend\.venv\Scripts\pythonw.exe backend\main.py` with no
-console. Logs then go to `%LOCALAPPDATA%\AUTOMATA\agent.log`. Turning the
-switch off deletes the launcher. Set `AUTOMATA_DISABLE_USAGE_TRACKER=1` to
-run the backend without app-usage recording; `AUTOMATA_DATA_DIR` moves the
-usage database.
-
-## Troubleshooting
-
-- **Database unavailable:** check the local `.env` path and connection string;
-  the backend can start in a disconnected state but memory will not persist.
-- **No project capture:** register a project whose repository path exists;
-  startup capture selects an available registered project.
-- **No local model:** start Ollama and pull the selected models, or configure
-  an available cloud provider.
-- **Frontend shows backend offline:** check the API health URL, local port,
-  and `VITE_API_BASE`.
-- **Automation/OCR unavailable:** check Windows desktop permissions and
-  optional application/OCR dependencies. These failures should be reported,
-  not treated as successful actions.
-
-## Desktop app build
-
-Requires Rust stable (`rustup default stable`) plus the npm deps.
-
-```powershell
-cd frontend
-npx tauri build --no-bundle   # → src-tauri\target\release\app.exe
-```
-
-Rust crate versions in `src-tauri/Cargo.lock` must match the `@tauri-apps/*`
-npm packages (same major.minor) or the build stops; update with
-`cargo update -p tauri -p tauri-plugin-autostart -p tauri-plugin-notification`.
-The app finds `backend/` by walking up from the exe (or `AUTOMATA_BACKEND_DIR`).
-
-## Environment flags
+Runtime flags (environment variables):
 
 | Variable | Effect |
 | --- | --- |
-| `AUTOMATA_DATA_DIR` | Folder for memory.db, tasks.db, usage.db, logs (default `%LOCALAPPDATA%\AUTOMATA`) |
+| `AUTOMATA_DATA_DIR` | Folder for `memory.db`, `tasks.db`, `usage.db`, logs (default `%LOCALAPPDATA%\AUTOMATA`) |
 | `AUTOMATA_DISABLE_BACKGROUND=1` | Skip capture, sync, snapshots and task recovery at startup |
 | `AUTOMATA_DISABLE_USAGE_TRACKER=1` | No app-usage recording |
-| `AUTOMATA_DISABLE_DESKTOP_INPUT=1` | Hard block on synthetic keys/focus (always on in tests) |
+| `AUTOMATA_DISABLE_DESKTOP_INPUT=1` | Hard block on synthetic keys and focus (always on in tests) |
 | `AUTOMATA_FORCE_ONLINE=0\|1` | Override the connectivity check |
 | `AUTOMATA_BACKEND_DIR` | Where the desktop app looks for `backend/main.py` |
 | `AUTOMATA_TASK_WATCH_MAX/QUIET/POLL` | Task watch-step timing (seconds) |
-| `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_EMBEDDING_MODEL`, `OLLAMA_MODELS` | Local model server, defaults, model storage folder |
+| `AUTOMATA_TASK_MODEL_QUESTIONS=0` | Skip model-suggested task questions |
+| `VITE_API_BASE`, `VITE_WS_BASE` | UI → agent address (default `127.0.0.1:8000`) |
 
 Optional offline embeddings without Ollama: `uv sync --extra local-ai`, then
-enable them via `POST /ai/local/offline-embeddings`.
+`POST /ai/local/offline-embeddings {"enabled": true}`.
+
+## Tests and quality gates
+
+Run these before every commit (CI runs the same — `.github/workflows/ci.yml`):
+
+```powershell
+cd backend
+uv run pytest tests/ -q                                   # 395 tests
+uv run ruff check .                                       # lint + bandit security rules
+
+cd ../frontend
+npx tsc -b          # type-check
+npx oxlint src      # lint
+npm test            # vitest
+npm run build       # production build
+```
+
+`backend/tests/conftest.py` blanks every database and provider setting before
+the app is imported, points data at a temporary folder, disables background
+threads and sets `AUTOMATA_DISABLE_DESKTOP_INPUT=1`. Tests therefore never touch
+your real database, a paid model API, the keyboard or the screen. New tests must
+mock `automation.win32` / `automation.desktop.capture` for anything visual.
+
+Dependency and security audits: see [SECURITY_AUDIT.md §5](SECURITY_AUDIT.md#5-re-running-the-audit).
+
+## Desktop app
+
+```powershell
+cd frontend
+npx tauri build --no-bundle      # → src-tauri\target\release\app.exe
+```
+
+The app supervises the agent: if nothing answers on `127.0.0.1:8000` it starts
+`backend\.venv\Scripts\pythonw.exe main.py` (no console) and restarts it if it
+dies. It finds `backend/` by walking up from the exe, or via
+`AUTOMATA_BACKEND_DIR`. Rust crate versions in `Cargo.lock` must match the
+`@tauri-apps/*` npm packages (same major.minor); update both together.
+
+**Start at sign-in** (Settings → Background agent) uses the Tauri autostart
+plugin in the desktop app (starts hidden in the tray). In the browser UI the
+same switch writes a Startup-folder launcher for the agent only.
+
+## Data and logs
+
+| What | Where |
+| --- | --- |
+| Local memory, tasks, app usage | `%LOCALAPPDATA%\AUTOMATA\memory.db`, `tasks.db`, `usage.db` |
+| Agent log (desktop app / autostart) | `%LOCALAPPDATA%\AUTOMATA\agent.log` |
+| Desktop shell log | `%LOCALAPPDATA%\com.automata.dev\logs\AUTOMATA.log` |
+| Work bar shortcut | `%APPDATA%\com.automata.dev\workbar.json` |
+| Workflow checkpoints | `%LOCALAPPDATA%\AUTOMATA\workflow_checkpoints\` |
+
+## Utility scripts
+
+| Script | Purpose |
+| --- | --- |
+| `scripts/dev.ps1` | Start agent + UI for development |
+| `scripts/check_env.py` | Report which optional cloud settings in `backend/.env` are filled |
+| `scripts/check_db_status.py` | Row counts in the optional CockroachDB copy |
+| `scripts/seed_project.py` | Register this repository as a project with architecture notes |
+
+Run Python scripts from the repo root with `uv run --project backend python scripts/<name>.py`.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| UI says the agent is offline | `http://127.0.0.1:8000/health`; another program on port 8000; `VITE_API_BASE` |
+| No answers offline | Setup & health → Local AI: install Ollama and pull the recommended model |
+| Work bar shortcut does nothing | Settings → AI work bar shows whether the shortcut is active; pick another if an app owns it |
+| "Unauthorized changes blocked" when Spotify starts | Windows Defender Controlled folder access — see USER_GUIDE.md → Permissions |
+| No activity captured | Select a project whose folder exists (Projects screen) |
+| Desktop actions fail | They report why (window not found, focus refused); they never pretend to succeed |

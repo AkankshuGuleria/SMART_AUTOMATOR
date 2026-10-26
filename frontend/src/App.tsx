@@ -29,6 +29,7 @@ import { usePolling } from './lib/usePolling'
 import { notify, onOpenScreen } from './lib/desktop'
 import FloatingSidebar from './components/layout/FloatingSidebar'
 import CommandPaletteV2 from './components/layout/CommandPaletteV2'
+import PermissionHost from './components/PermissionHost'
 
 import Dashboard from './screens/Dashboard'
 
@@ -204,6 +205,8 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', position: 'relative', background: 'var(--bg-base)' }}>
+
+      <PermissionHost />
 
       {/* ── Ambient background ──────────────────────────────────────────── */}
       <div className="ambient-bg" />

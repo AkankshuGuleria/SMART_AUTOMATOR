@@ -49,7 +49,7 @@ from db.client import (
 )
 from db.client import (
     health_check as db_health_check,
-)  # noqa: E402
+)
 
 logger = logging.getLogger(__name__)
 
@@ -358,10 +358,9 @@ async def _lifespan(_app: FastAPI):
     background = os.environ.get("AUTOMATA_DISABLE_BACKGROUND", "") != "1"
     if background:
         from memory.sync import start_sync
+        from tasks.engine import recover_interrupted
         from workspace.capture_manager import get_manager
         from workspace.snapshot import start_snapshots
-
-        from tasks.engine import recover_interrupted
 
         start_sync()
         await asyncio.to_thread(get_manager().start_default)
@@ -395,22 +394,17 @@ from api.workspace_routes import router as _workspace_router  # noqa: E402
 
 app.include_router(_workspace_router)
 
+from security.http_guard import ALLOWED_ORIGINS, LocalOnlyGuard  # noqa: E402
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:1420",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "tauri://localhost",
-        "http://tauri.localhost",  # Tauri 2 on Windows serves the app from here
-        "https://tauri.localhost",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=sorted(ALLOWED_ORIGINS),  # Tauri 2 on Windows serves the app from http(s)://tauri.localhost
+    allow_credentials=False,  # no cookies or auth headers are used
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
+# Outermost: refuse requests from other websites and DNS-rebinding before anything runs.
+app.add_middleware(LocalOnlyGuard)
 
 # ─── Global State ──────────────────────────────────────────────────────────────
 CURRENT_REASONING_MODE = settings.reasoning_mode or "auto"
@@ -1309,7 +1303,7 @@ def chat(body: dict = Body(...)) -> dict:
     # Quick everyday commands (music, search, screen) need no project or planner.
     from assist.commands import run as run_quick_command
 
-    quick = run_quick_command(message, project_id or None)
+    quick = run_quick_command(message, project_id or None, body.get("permission_id"))
     if quick is not None:
         return {
             "intent": quick["intent"],
@@ -1319,7 +1313,8 @@ def chat(body: dict = Body(...)) -> dict:
             "executed_actions": [],
             "project_id": project_id or None,
             "backend": "ok",
-            **({} if quick["success"] else {"error": quick["reply"]}),
+            **({"needs_permission": quick["needs_permission"]} if quick.get("needs_permission") else
+               {} if quick["success"] else {"error": quick["reply"]}),
         }
 
     from decision_engine.intent_parser import IntentType, parse_intent
@@ -1422,8 +1417,10 @@ def approve_action(body: dict = Body(...)) -> dict:
     if not action_type:
         raise HTTPException(status_code=422, detail="action_type is required")
 
+    from security.permissions import needs_card
+
     policy = ACTION_POLICY.get(action_type)
-    if policy not in {"suggest", "confirm_once", "require_approval"}:
+    if policy not in {"suggest", "confirm_once", "require_approval"} and not needs_card(action_type):
         raise HTTPException(status_code=400, detail="Action does not require approval")
 
     params = body.get("params") or {}
@@ -1506,15 +1503,17 @@ def send_external_agent_prompt(tool: str, body: dict = Body(...)) -> dict:
     from automation.agent_bridge import AgentBridge
     from memory.capture import redact_secrets
 
-    if tool not in {"claude", "cursor", "antigravity", "vscode"}:
+    if tool not in {"claude", "cursor", "antigravity", "vscode", "kilo"}:
         raise HTTPException(status_code=404, detail="Unknown external agent")
-    if body.get("approved") is not True:
-        raise HTTPException(
-            status_code=403, detail="External agent execution requires approved=true"
-        )
     prompt = str(body.get("prompt", "")).strip()
     if not prompt:
         raise HTTPException(status_code=422, detail="prompt is required")
+    # A caller-supplied "approved" flag is not consent: the user approves in the UI.
+    from security.permissions import check
+
+    request = check("app_control", f"Send a {len(prompt)}-character prompt to {tool}", body.get("permission_id"))
+    if request is not None:
+        return {"result": None, "needs_permission": request}
 
     result = AgentBridge().send_prompt(tool, redact_secrets(prompt), body.get("params"))
     return {"result": vars(result)}
@@ -1544,11 +1543,22 @@ def execute_command(body: dict = Body(...)) -> dict:
             "executed_at": datetime.now(UTC).isoformat(),
         }
 
+    allow_execute = bool(body.get("allow_execute", False))
+    if allow_execute:
+        # Running a shell command is the user's call, not the caller's flag.
+        from security.permissions import check
+
+        request = check("system", f"Run `{cmd[:200]}` in {cwd}", body.get("permission_id"))
+        if request is not None:
+            return {"command": cmd, "status": "needs_permission", "executed": False, "suggested": True,
+                    "needs_permission": request, "exit_code": None, "stdout": "", "stderr": "",
+                    "executed_at": None}
+
     try:
         from automation.command_executor import CommandExecutor
 
         result = CommandExecutor(
-            cwd=cwd, allow_auto_execute=bool(body.get("allow_execute", False))
+            cwd=cwd, allow_auto_execute=allow_execute
         ).execute(
             cmd,
             context=str(body.get("context", "")),
@@ -1616,8 +1626,13 @@ def execute_open_browser(body: dict = Body(...)) -> dict:
         return {"success": False, "error": "url is required"}
 
     try:
-        if not re.match(r"^https?://[^@/]+", url):
+        if not re.match(r"^https?://[^@/\s]+", url):
             raise ValueError("Invalid URL format")
+        from security.permissions import check
+
+        request = check("launch", f"Open {url[:200]} in your browser", body.get("permission_id"))
+        if request is not None:
+            return {"success": False, "needs_permission": request}
 
         from automation.os_windows import launch_browser
 
@@ -1666,9 +1681,14 @@ def project_summary(project_id: str) -> dict:
 
 
 @app.post("/projects/{project_id}/start-dev-environment", tags=["agent_actions"])
-def start_dev_env(project_id: str) -> dict:
+def start_dev_env(project_id: str, body: dict | None = Body(None)) -> dict:
     from agent_actions import start_development_environment
+    from security.permissions import check
 
+    request = check("workspace", "Start this project's dev servers in new terminal windows",
+                    (body or {}).get("permission_id"))
+    if request is not None:
+        return {"success": False, "needs_permission": request}
     return start_development_environment(project_id)
 
 
@@ -1681,6 +1701,11 @@ def submit_task(body: dict = Body(...)) -> dict:
         return {"task_id": task_id, "status": "error", "error": "action is required"}
     if not isinstance(params, dict):
         return {"task_id": task_id, "status": "error", "error": "params must be an object"}
+    from security.permissions import check
+
+    request = check("app_control", f"Run the cross-app action “{action}”", body.get("permission_id"))
+    if request is not None:
+        return {"task_id": task_id, "status": "needs_permission", "needs_permission": request}
     from agent_actions import submit_cross_app_task
 
     return submit_cross_app_task(task_id, action, params)

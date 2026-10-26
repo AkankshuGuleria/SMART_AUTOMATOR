@@ -2,7 +2,7 @@
 
 Owns:    WorkflowDefinition, Step, WorkflowRun, WorkflowStep dataclasses/pydantic models.
 Never:   Must not call Bedrock or CockroachDB directly.
-Ref:     FEATURES_PHASE.md §6, WORKFLOW_ENGINE.md §4.
+Ref:     docs/ACTION_POLICIES.md, docs/WORKFLOW_ENGINE.md.
 """
 
 from __future__ import annotations

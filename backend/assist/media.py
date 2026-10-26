@@ -158,10 +158,14 @@ def spotify_play(query: str, wait: float = 12.0) -> dict[str, Any]:
             if button is not None:
                 break
         time.sleep(0.7)
+    from security.defender import explain_block
+
+    blocked = explain_block("spotify", seconds=45)  # Defender's popup on Spotify start
     if window is None:
-        return {"success": False, "error": "Spotify did not open."}
+        return {"success": False, "error": "Spotify did not open." + (f" {blocked}" if blocked else "")}
     if button is None:
-        return {"success": False, "error": f"Spotify opened the search for '{query}', but no result had a Play button."}
+        return {"success": False, "error": f"Spotify opened the search for '{query}', but no result had a Play button."
+                + (f" {blocked}" if blocked else "")}
     from automation.chat_apps import _invoke
 
     if not _invoke(button):
@@ -170,8 +174,9 @@ def spotify_play(query: str, wait: float = 12.0) -> dict[str, Any]:
         time.sleep(0.6)
         if _player_state(window.hwnd) == "playing":
             np = now_playing()
-            return {"success": True, "verified": True, "now_playing": np,
-                    "message": f"Playing on Spotify: {_describe(np)}" if np.get("title") else
-                               f"Playing '{name.removeprefix('Play ') if name else query}' on Spotify."}
+            msg = (f"Playing on Spotify: {_describe(np)}" if np.get("title") else
+                   f"Playing '{name.removeprefix('Play ') if name else query}' on Spotify.")
+            return {"success": True, "verified": True, "now_playing": np, "defender": blocked,
+                    "message": msg + (f"\n\nNote: {blocked}" if blocked else "")}
     return {"success": False, "verified": False,
             "error": f"Pressed Play on '{name}', but Spotify did not start playing."}

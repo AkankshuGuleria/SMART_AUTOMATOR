@@ -122,8 +122,10 @@ class CommandExecutor:
             undo_hint=policy.undo_hint,
         )
 
+        from memory.capture import redact_secrets
+
         log_payload = {
-            "command": command,
+            "command": redact_secrets(command),
             "policy": policy.risk,
             "context": context,
             "session_id": session_id,
@@ -136,9 +138,10 @@ class CommandExecutor:
             return result
 
         try:
-            completed = subprocess.run(
+            # Shell on purpose: the user's own command, approved via permission 'system'.
+            completed = subprocess.run(  # noqa: S602
                 command,
-                shell=True,
+                shell=True,  # nosec B602 — the user's own command, approved via permission "system"
                 cwd=self.cwd,
                 capture_output=True,
                 text=True,

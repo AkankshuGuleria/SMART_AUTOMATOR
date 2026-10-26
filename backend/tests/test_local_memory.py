@@ -109,8 +109,8 @@ def test_grounded_query_uses_local_memory_when_cloud_is_down(store, monkeypatch)
 
 
 def test_reasoning_skips_cloud_when_offline(monkeypatch):
-    import types
     import sys
+    import types
 
     from ai import bedrock_client
 

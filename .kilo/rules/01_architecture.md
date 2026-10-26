@@ -1,35 +1,22 @@
-# AUTOMATA — Architecture Rules
+# AUTOMATA — architecture rules
 
-## Agent Loop (the core concept)
-Every feature must reinforce this loop — this is what makes AUTOMATA an *agent*, not a chatbot:
-```
-Observe → Store Memory → Reason → Plan → Execute → Update Memory → Repeat
-```
+Full picture: `docs/ARCHITECTURE.md`.
 
-## Component map
-| Component | Code location | What it owns | What it must NEVER do |
-|---|---|---|---|
-| Persistent Memory Engine | `backend/memory/` | DB writes, embedding gen, vector retrieval | Call Bedrock directly, execute OS actions |
-| Reasoning Engine | `backend/ai/` | All Bedrock calls | Write to DB, execute OS actions |
-| Automation Layer | `backend/automation/` | OS-level actions (Windows only) | Write to DB directly, call Bedrock |
-| Decision Engine | `backend/decision_engine/` | Trigger detection, suggest-vs-execute routing | Bypass the Agent Loop, call Bedrock/DB directly |
-| API server | `backend/api/` | FastAPI routes, WebSocket | Contain business logic, touch DB/Bedrock directly |
-| Frontend | `frontend/src/` | UI rendering | Talk to CockroachDB or Bedrock directly |
+| Area | Location | Owns | Must never |
+| --- | --- | --- | --- |
+| API | `backend/api/` | FastAPI routes, WebSocket | Hold business logic |
+| Security | `backend/security/` | Permissions, local-only API guard, Defender notes | Change Windows security settings |
+| Reasoning | `backend/ai/` | All model calls, offline routing, Ollama | Write to a DB, act on the PC |
+| Memory | `backend/memory/` | Local SQLite memory, capture, cloud sync | Store secrets or file contents |
+| Desktop control | `backend/automation/` | Verified focus/type/paste/OCR, AI-app hand-off | Act without verifying the result |
+| Tasks | `backend/tasks/` | Delegation steps, questions, Needs inbox | Skip an approval gate |
+| Quick assist | `backend/assist/` | Work bar commands (media, search, screen) | Run before permission |
+| Project intelligence | `backend/intelligence/` | Stack, run book, env vars, modules | Read env var values |
+| Frontend | `frontend/src/` | UI only, all HTTP in `lib/api.ts` | Render untrusted text as HTML |
+| Desktop shell | `frontend/src-tauri/` | Tray, supervisor, work-bar shortcut | Bypass the agent API |
 
-## Primary OS: Windows
-- All automation code uses Windows APIs via `backend/automation/os_windows.py`.
-- No cross-OS code in the MVP.
-
-## Transport: FastAPI + WebSocket over localhost
-- Frontend calls Python backend at `http://127.0.0.1:8000`.
-- Live updates over `ws://127.0.0.1:8000/ws`.
-
-## Memory types
-- **Short-term**: RAM only — never persisted past process restart.
-- **Long-term**: CockroachDB structured rows.
-- **Semantic**: CockroachDB Vector Index (embeddings on `*_embedding` columns).
-
-## Decision Engine guardrails
-- `auto_execute`: passive, reversible actions (update summary, flag TODO, generate brief).
-- `suggest`: environment-changing actions (restore workspace, launch editor) — NEVER auto-execute these.
-- Every autonomous action is logged to `decision_log` with provenance.
+- Windows is the target platform; other platforms must fail with a clear message.
+- The agent binds to `127.0.0.1:8000`; the UI talks HTTP + `ws://127.0.0.1:8000/ws`.
+- Local memory (SQLite FTS5) works offline; CockroachDB is an optional cloud copy.
+- Planner policies: `auto_execute` only for passive, reversible actions; PC
+  control is `confirm_once` unless the user always-allowed that category.

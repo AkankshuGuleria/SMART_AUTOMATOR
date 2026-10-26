@@ -1,0 +1,27 @@
+# Normalise line endings: LF in the repository and in working copies, on every OS.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF so they open cleanly in Notepad/PowerShell ISE.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary files: never touch.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.exe binary
+*.dll binary
+*.db binary
+
+# Lockfiles: generated, collapse them in diffs.
+uv.lock linguist-generated=true -diff
+package-lock.json linguist-generated=true -diff
+Cargo.lock linguist-generated=true -diff
+frontend/src-tauri/gen/** linguist-generated=true

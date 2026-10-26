@@ -1,3 +1,5 @@
+> **Historical document** — the project audit of 26 Oct 2026, kept for context. Current status: [PROJECT_STATUS.md](../PROJECT_STATUS.md); current security: [SECURITY_AUDIT.md](../SECURITY_AUDIT.md).
+
 # AUTOMATA — audit and status report
 
 Date: 2026-10-26 · Branch `chore/project-review-monitoring` (last commit `36c7e05`) ·
@@ -44,7 +46,7 @@ what changed, why it changed, and what remains to be done.*
 
 **Intended user** (§3): one developer, one Windows machine, one or more local repos.
 
-**Extended goal** (`docs/SMART_WORKSPACE_PLAN.md`): an AI development workspace
+**Extended goal** (`docs/history/smart-workspace-plan.md`): an AI development workspace
 that:
 
 - starts with Windows and remembers every project;

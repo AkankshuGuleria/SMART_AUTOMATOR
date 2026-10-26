@@ -103,13 +103,13 @@ def start_pull(model: str) -> dict[str, Any]:
 
     def worker() -> None:
         try:
-            req = urllib.request.Request(
+            req = urllib.request.Request(  # noqa: S310 — URL from _ollama_url(), restricted to http(s)
                 f"{_ollama_url()}/api/pull",
                 data=json.dumps({"name": model, "stream": True}).encode(),
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=3600) as resp:
+            with urllib.request.urlopen(req, timeout=3600) as resp:  # noqa: S310 — URL from _ollama_url(), restricted to http(s)
                 for raw in resp:
                     if not raw.strip():
                         continue

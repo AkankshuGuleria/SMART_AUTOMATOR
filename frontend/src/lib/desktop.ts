@@ -91,3 +91,71 @@ export async function onOpenScreen(handler: (screen: string) => void): Promise<(
     return () => {}
   }
 }
+
+export interface WorkbarShortcut {
+  shortcut: string
+  registered: boolean
+  error?: string | null
+}
+
+/** Current work bar shortcut (desktop app only). */
+export async function getWorkbarShortcut(): Promise<WorkbarShortcut | null> {
+  if (!isTauri()) return null
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return await invoke<WorkbarShortcut>('get_workbar_shortcut')
+  } catch {
+    return null
+  }
+}
+
+/** Change the work bar shortcut; throws with a readable message if Windows refuses it. */
+export async function setWorkbarShortcut(shortcut: string): Promise<WorkbarShortcut> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  try {
+    return await invoke<WorkbarShortcut>('set_workbar_shortcut', { shortcut })
+  } catch (e) {
+    throw new Error(typeof e === 'string' ? e : e instanceof Error ? e.message : 'Could not set the shortcut')
+  }
+}
+
+/** Show or hide the work bar. */
+export async function toggleWorkbar(): Promise<void> {
+  if (!isTauri()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('toggle_workbar_cmd')
+}
+
+/** Turn a keydown event into a shortcut string ("Ctrl+Shift+K"), or null while only modifiers are held. */
+export function shortcutFromEvent(e: { code: string; key?: string; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }): string | null {
+  const code = e.code ?? ''
+  const k = e.key ?? ''
+  if (/^(Control|Shift|Alt|Meta)(Left|Right)?$/.test(code) || ['Control', 'Shift', 'Alt', 'Meta'].includes(k)) return null
+  let key: string | null = null
+  if (/^Key[A-Z]$/.test(code)) key = code.slice(3)
+  // Some tools send keys without a scan code (code is empty): use the key value.
+  else if (!code && /^[a-z0-9]$/i.test(k)) key = k.toUpperCase()
+  else if (!code && k === ' ') key = 'Space'
+  else if (/^Digit\d$/.test(code)) key = code.slice(5)
+  else if (/^F\d{1,2}$/.test(code)) key = code
+  else if (['Space', 'Enter', 'Tab', 'Backquote', 'Minus', 'Equal', 'BracketLeft', 'BracketRight', 'Backslash',
+    'Semicolon', 'Quote', 'Comma', 'Period', 'Slash', 'Home', 'End', 'PageUp', 'PageDown', 'Insert',
+    'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(code)) key = code
+  if (!key) return null
+  const mods = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Super'].filter(Boolean)
+  if (!mods.length && !/^F\d{1,2}$/.test(key)) return null // plain letters would block typing everywhere
+  return [...mods, key].join('+')
+}
+
+/** Shortcuts other tools rely on: a global hotkey would steal them everywhere. */
+export const RESERVED_SHORTCUTS: Record<string, string> = {
+  'Ctrl+Shift+A': 'Kilo Code uses it to focus its chat',
+  'Ctrl+Alt+A': 'Kilo Code uses it to toggle auto-approve',
+  'Ctrl+Shift+M': 'Kilo Code / VS Code use it',
+  'Ctrl+Shift+Space': 'editors use it for parameter hints',
+  'Ctrl+Space': 'editors use it for autocomplete',
+  'Ctrl+Shift+P': 'command palette in editors',
+  'Ctrl+C': 'copy', 'Ctrl+V': 'paste', 'Ctrl+X': 'cut', 'Ctrl+Z': 'undo', 'Ctrl+S': 'save', 'Ctrl+A': 'select all',
+  'Ctrl+L': 'Antigravity agent panel / browser address bar',
+  'Alt+Tab': 'Windows app switching', 'Alt+F4': 'closes windows',
+}

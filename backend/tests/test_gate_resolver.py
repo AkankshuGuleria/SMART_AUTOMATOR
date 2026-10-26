@@ -3,7 +3,7 @@ tests/test_gate_resolver.py - Workflow engine gate resolver tests.
 
 Tests the gate_resolver.py pure function that determines where
 workflow execution must pause for user approval based on the
-composition rule from FEATURES_PHASE.md §4 and WORKFLOW_ENGINE.md §2.
+composition rule from docs/ACTION_POLICIES.md and docs/WORKFLOW_ENGINE.md.
 """
 
 from decision_engine.tools import Tool
@@ -165,7 +165,9 @@ def test_real_gate_resolver_accepts_dict_registry() -> None:
 
 
 def test_real_gate_resolver_accepts_tool_registry() -> None:
-    noop = lambda params: {"success": True}
+    def noop(params):
+        return {"success": True}
+
     steps = [
         StepDefinition(id="copy", tool="copy_to_clipboard"),
         StepDefinition(id="paste", tool="paste_clipboard"),

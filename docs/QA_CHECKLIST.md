@@ -1,4 +1,4 @@
-# MVP verification checklist
+# Release verification checklist
 
 Use a disposable local repository and an explicitly provisioned test
 database. Keep real provider calls and production data out of automated
@@ -72,9 +72,17 @@ items.
 - [ ] "switch to the <x> tab", "type 'hello' into notepad", "what windows are open" — check each reported target.
 - [ ] Delegation: "using antigravity add a contact form" → read prompt → approve → files change → approve build → Inbox items.
 - [ ] Inbox: save a test key to Credential Manager + .env; confirm it is not in memory.db/tasks.db.
-- [ ] Work bar: Alt+Space and Ctrl+Alt+A open it top-centre; Esc / click-away hide it.
+- [ ] Work bar: Alt+Space (or the shortcut set in Settings) opens it top-centre; Esc / click-away hide it.
 - [ ] "play <song> on spotify" starts it; pause / next / volume work; "what's playing" matches.
 - [ ] "Read my screen" explains the window behind the bar; nothing is captured unless pressed.
 - [ ] Delegation asks its questions; the chosen folder is created and appears in the prompt.
 - [ ] Antigravity hand-off: prompt lands in the Agent panel's chat box and is sent after approval.
 - [ ] No console window flashes during normal use (Setup screen, Tasks, work bar).
+
+## Permissions and security
+
+- [ ] Opening an app, typing, music, screen reading and Resume each ask first; Deny does nothing.
+- [ ] "Always allow" in Settings → Permissions removes the prompt for that category only.
+- [ ] `curl -H "Host: attacker.example" http://127.0.0.1:8000/health` → 403.
+- [ ] A request with `Origin: https://example.com` → 403; the app itself keeps working.
+- [ ] Dependency and static-analysis audits clean (SECURITY_AUDIT.md §5).

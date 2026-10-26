@@ -58,7 +58,7 @@ def test_plan_returns_actions_with_policy() -> None:
     })
     actions = result.get("actions", [])
     assert len(actions) > 0
-    assert actions[0]["policy"] == "auto_execute"
+    assert actions[0]["policy"] == "confirm_once"  # clipboard = controlling the PC: ask first
     assert actions[0]["type"] == "copy_to_clipboard"
 
 

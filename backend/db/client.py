@@ -1342,10 +1342,10 @@ def get_commits_over_time(project_id: str, days: int = 7) -> list[dict]:
         try:
             result = session.execute(
                 text(
-                    "SELECT CAST(committed_at AS DATE) AS day, "
+                    "SELECT CAST(committed_at AS DATE) AS day, "  # noqa: S608 — days is int(); project_id is a bound parameter
                     "COUNT(*) AS count "
                     f"FROM commits WHERE project_id = :project_id "
-                    f"AND committed_at >= now() - INTERVAL '{days} days' "
+                    f"AND committed_at >= now() - INTERVAL '{int(days)} days' "
                     f"GROUP BY CAST(committed_at AS DATE) "
                     f"ORDER BY day DESC"
                 ),
@@ -1369,10 +1369,10 @@ def get_file_edits_over_time(project_id: str, days: int = 7) -> list[dict]:
         try:
             result = session.execute(
                 text(
-                    "SELECT CAST(edited_at AS DATE) AS day, "
+                    "SELECT CAST(edited_at AS DATE) AS day, "  # noqa: S608 — days is int(); project_id is a bound parameter
                     "COUNT(*) AS count "
                     f"FROM file_edits WHERE project_id = :project_id "
-                    f"AND edited_at >= now() - INTERVAL '{days} days' "
+                    f"AND edited_at >= now() - INTERVAL '{int(days)} days' "
                     f"GROUP BY CAST(edited_at AS DATE) "
                     f"ORDER BY day DESC"
                 ),

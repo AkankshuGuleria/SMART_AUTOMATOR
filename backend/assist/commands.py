@@ -103,12 +103,44 @@ def web_search(query: str, engine: str | None = None) -> dict[str, Any]:
     return {"success": True, "url": url, "message": f"Searching {engine.title()} for “{query}”."}
 
 
-def run(text: str, project_id: str | None = None) -> dict[str, Any] | None:
-    """Run a quick command. Returns {intent, reply, success, result} or None if not one."""
+# Which permission each quick command needs (reading "what's playing" needs none).
+COMMAND_PERMISSION = {
+    "pause": "media", "resume": "media", "next": "media", "previous": "media", "volume_up": "media",
+    "volume_down": "media", "mute": "media", "spotify_play": "media", "search": "launch", "screen": "screen",
+}
+
+
+def describe(name: str, args: dict[str, str]) -> str:
+    """Plain description of what the command will do (shown in the permission prompt)."""
+    q = args.get("q", "")
+    return {
+        "pause": "Pause what is playing", "resume": "Resume playback", "next": "Skip to the next track",
+        "previous": "Go back to the previous track", "volume_up": "Turn the volume up",
+        "volume_down": "Turn the volume down", "mute": "Mute / unmute the sound",
+        "spotify_play": f"Open Spotify and play “{q}”",
+        "search": f"Open your browser and search {args.get('engine', 'google').title()} for “{q}”",
+        "screen": "Take a screenshot of the window behind AUTOMATA, read its text and answer",
+    }.get(name, name)
+
+
+def run(text: str, project_id: str | None = None, permission_id: str | None = None) -> dict[str, Any] | None:
+    """Run a quick command. Returns {intent, reply, success, result} or None if not one.
+
+    Commands that control the PC first return {needs_permission: {...}} unless the
+    user always allows that kind of action or *permission_id* approves this one.
+    """
     found = match(text)
     if not found:
         return None
     name, args = found
+    category = COMMAND_PERMISSION.get(name)
+    if category:
+        from security.permissions import check
+
+        request = check(category, describe(name, args), permission_id)
+        if request is not None:
+            return {"intent": f"assist_{name}", "success": False, "needs_permission": request,
+                    "reply": f"Permission needed — {request['label'].lower()}: {request['action']}."}
     from assist import media
 
     try:

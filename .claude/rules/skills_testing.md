@@ -1,22 +1,24 @@
-# Testing Skill — AUTOMATA (SKILLS.md §1)
+# Testing skill — AUTOMATA
 
 ## When to use
-Before marking any feature done. Before every commit touching `backend/` or `frontend/`.
+Before marking any feature done and before every commit touching `backend/` or `frontend/`.
 
 ## Checklist
-- [ ] Unit tests: pure logic only — **zero live DB or Bedrock calls**
-- [ ] Integration tests: use local/test CockroachDB — never production data
-- [ ] Reasoning Engine tests: mock Bedrock — no real API calls in CI
-- [ ] Automation Layer tests: use stubbed OS interface — never actually launch apps
-- [ ] End-to-end: at least one test per demo step (`PROJECT.md §13`), run manually before milestone
-- [ ] After schema change: re-run retrieval tests to confirm vector search top-k results unchanged
+- [ ] Unit tests: pure logic, **no live DB, model provider, keyboard or screen** —
+      `backend/tests/conftest.py` isolates these; mock `automation.win32` / `desktop.capture`
+- [ ] Assert real outputs and failure states, not just "no exception thrown"
+- [ ] Security-relevant change → regression test in `backend/tests/test_permissions.py`
+- [ ] Retrieval change → `backend/tests/test_memory_quality.py` still green (wrong memories are worse than none)
+- [ ] UI change → `npx tsc -b`, `npx oxlint src`, `npm test`; check it in the running app
+- [ ] Desktop-control change → also verify live against a throwaway window/folder
 
 ## Run
 ```powershell
-cd backend && uv run pytest tests/ -v --tb=short
+cd backend;  uv run pytest tests/ -q
+cd frontend; npx tsc -b; npx oxlint src; npm test
 ```
 
 ## Failure modes to avoid
-- Checking only "no exception thrown" — check actual content
 - Flaky tests from real network calls — mock everything external
-- Skipping retrieval quality testing — wrong memories are worse than visible failures
+- Tests that press real keys or read the real screen (the kill switch
+  `AUTOMATA_DISABLE_DESKTOP_INPUT=1` is set in conftest; keep it)

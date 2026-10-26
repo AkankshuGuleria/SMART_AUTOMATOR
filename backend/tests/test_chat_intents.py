@@ -12,12 +12,11 @@ from fastapi.testclient import TestClient
 from api.server import app
 from decision_engine.intent_parser import IntentParser, IntentType
 from decision_engine.planner import (
+    _detect_secondary_query,
     _execute_chat_git_log,
     _execute_chat_query_memory,
-    _detect_secondary_query,
     _get_actions_for_trigger,
 )
-
 
 # ─── Intent parsing ───────────────────────────────────────────────────────────
 
@@ -245,9 +244,9 @@ class TestChatRouteIntentRouting:
         body = response.json()
         assert body["intent"] == "open_browser"
         assert body["actions"][0]["type"] == "chat_open_browser"
-        assert body["actions"][0]["executed"] is True
+        assert body["actions"][0]["executed"] is False  # asks first
+        mock_open.assert_not_called()
         assert "general_assistant" != body["intent"]
-        mock_open.assert_called_once()
 
     def test_open_spotify_routes_to_app_control(self):
         with patch("agent_actions.open_app_or_url", return_value={
@@ -264,8 +263,8 @@ class TestChatRouteIntentRouting:
         body = response.json()
         assert body["intent"] == "open_app"
         assert body["actions"][0]["type"] == "chat_open_app"
-        assert body["actions"][0]["executed"] is True
-        mock_open.assert_called_once()
+        assert body["actions"][0]["executed"] is False  # asks first
+        mock_open.assert_not_called()
 
     def test_paste_clipboard_pauses_for_confirmation(self):
         with patch("automation.os_windows.paste_clipboard") as mock_paste:

@@ -63,8 +63,13 @@ def test_play_without_spotify_word_uses_spotify_when_installed(monkeypatch):
 
 def test_chat_runs_quick_commands_without_a_project(monkeypatch):
     monkeypatch.setattr("assist.media.control", lambda action: {"success": True, "message": f"did {action}"})
-    body = client.post("/chat", json={"message": "next song"}).json()
+    first = client.post("/chat", json={"message": "next song"}).json()
+    req = first["needs_permission"]  # asks before touching the PC
+    assert req["category"] == "media" and req["action"] == "Skip to the next track"
+    body = client.post("/chat", json={"message": "next song", "permission_id": req["id"]}).json()
     assert body["intent"] == "assist_next" and body["reply"] == "did next"
+    again = client.post("/chat", json={"message": "next song", "permission_id": req["id"]}).json()
+    assert "needs_permission" in again  # approvals are single-use
 
 
 def test_assist_endpoint_falls_back_to_chat():
@@ -75,7 +80,9 @@ def test_assist_endpoint_falls_back_to_chat():
 def test_search_opens_the_right_url(monkeypatch):
     opened = []
     monkeypatch.setattr("webbrowser.open", lambda url, new=0: opened.append(url) or True)
-    r = commands.run("search react hooks on youtube")
+    first = commands.run("search react hooks on youtube")
+    assert first["needs_permission"]["category"] == "launch" and opened == []
+    r = commands.run("search react hooks on youtube", permission_id=first["needs_permission"]["id"])
     assert r["success"] and opened == ["https://www.youtube.com/results?search_query=react+hooks"]
 
 
@@ -182,3 +189,125 @@ def test_installed_guard_applies_to_every_popen(monkeypatch):
     monkeypatch.setattr(subprocess.Popen, "_execute_child", spy)
     subprocess.run(["cmd", "/c", "exit 0"], capture_output=True)
     assert seen["flags"] & no_console.CREATE_NO_WINDOW
+
+
+# ─── "open antigravity and use kilo code …" (regression 2026-10-26) ──────────
+
+USER_REQUEST = ("open antigravity and use kilo code ai agent to make my portfolio design the protfolio around "
+                "game named valorant as i am pro valorant player and the stuff to put in ill tell you later "
+                "just show me the design so i can analyse changes")
+
+
+@pytest.mark.parametrize("text,agent", [
+    (USER_REQUEST, "kilo"),
+    ("use kilo code to fix the login bug", "kilo"),
+    ("launch cursor and build a todo app", "cursor"),
+    ("start claude code and write tests", "claude"),
+    ("using antigravity add a contact form", "antigravity"),
+])
+def test_agent_requests_become_delegation_tasks(text, agent):
+    from decision_engine.intent_parser import IntentType, parse_intent
+
+    parsed = parse_intent(text)
+    assert parsed.intent == IntentType.DELEGATE_TASK
+    assert parsed.params["app_name"] == agent
+
+
+@pytest.mark.parametrize("text", ["open antigravity", "open spotify", "open vs code"])
+def test_plain_open_stays_open_app(text):
+    from decision_engine.intent_parser import IntentType, parse_intent
+
+    assert parse_intent(text).intent == IntentType.OPEN_APP
+
+
+@pytest.mark.parametrize("text,target", [
+    (USER_REQUEST, "antigravity-ide"),  # used to launch VS Code ("kilo *code*")
+    ("open antigravity", "antigravity-ide"),
+    ("open vs code", "code"),
+    ("open the calculator", "calc"),
+    ("open notepad++", "notepad++"),
+])
+def test_app_target_uses_the_app_phrase_only(text, target):
+    from agent_actions import _resolve_app_target
+
+    assert _resolve_app_target(text)[1] == target
+
+
+def test_task_title_drops_agent_phrases():
+    from tasks.engine import _title
+
+    assert _title(USER_REQUEST, "kilo").startswith("Make my portfolio design")
+    assert _title("add login with google using claude code", "claude") == "Add login with google"
+
+
+def test_kilo_is_a_known_agent(monkeypatch):
+    from automation import agent_bridge, chat_apps
+    from tasks.engine import AGENT_LABELS
+
+    assert AGENT_LABELS["kilo"] == "Kilo Code"
+    monkeypatch.setattr(chat_apps, "installed", lambda key: key == "kilo")
+    status = agent_bridge._detect("kilo")
+    assert status.prompt_via == "app_chat"
+    assert "type a message, @ to mention" in chat_apps.APPS["kilo"].input_names
+    assert chat_apps.APPS["kilo"].open_chat_chords == ("ctrl+shift+a",)
+
+
+def test_invisible_placeholder_counts_as_empty():
+    from automation.chat_apps import _contains_prompt
+    from automation.uia import visible_text
+
+    assert visible_text("￼") == "" and visible_text(" ​\n") == ""
+    assert _contains_prompt("￼Build a page", "Build a page")
+
+
+def test_launch_app_starts_the_real_exe_without_powershell(monkeypatch, tmp_path):
+    from automation import os_windows
+
+    exe = tmp_path / "Code.exe"
+    exe.write_text("")
+    started = []
+    monkeypatch.setitem(os_windows.KNOWN_APP_EXES, "code", [str(exe)])
+    monkeypatch.setattr(os_windows, "_start_detached", lambda path: started.append(path))
+    monkeypatch.setattr(os_windows.subprocess, "run", lambda *a, **k: pytest.fail("PowerShell must not be used"))
+    assert os_windows.launch_app("vscode") is True
+    assert started == [str(exe)]
+
+
+def test_paste_chip_counts_as_delivered():
+    from automation.chat_apps import APPS, _contains_prompt
+
+    prompt = "\n".join(f"line {i}" for i in range(26))
+    chip = APPS["kilo"].paste_chip
+    assert _contains_prompt("[Pasted ~26 lines]", prompt, chip)
+    assert not _contains_prompt("[Pasted ~3 lines]", prompt, chip)
+    assert not _contains_prompt("[Pasted ~26 lines]", prompt, None)
+
+
+def test_watch_waits_while_the_agent_is_busy(monkeypatch, tmp_path):
+    import json
+    import os
+
+    from tasks import engine
+
+    repo = tmp_path / "site"
+    repo.mkdir()
+    baseline = tmp_path / "b.json"
+    baseline.write_text(json.dumps({}))
+    (repo / "a.css").write_text("x")
+    monkeypatch.setenv("AUTOMATA_TASK_WATCH_MAX", "5")
+    monkeypatch.setenv("AUTOMATA_TASK_WATCH_QUIET", "0.1")
+    monkeypatch.setenv("AUTOMATA_TASK_WATCH_POLL", "0.05")
+    answers = iter([True, True, True, False, False])
+    calls = []
+
+    def busy(task, folder):
+        calls.append(1)
+        return next(answers, False)
+
+    monkeypatch.setattr(engine, "_agent_busy", busy)
+    task = {"id": "t1", "agent": "kilo"}
+    out = engine.step_watch(task, {"context": {"repo_path": str(repo)}, "handoff": {"baseline_path": str(baseline)}})
+    assert out["changed_files"] == ["a.css"]
+    assert len(calls) >= 4  # kept watching while the agent reported busy
+    assert "after the agent finished" in out["message"]
+    assert os.path.exists(repo / "a.css")

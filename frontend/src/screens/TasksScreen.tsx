@@ -17,6 +17,7 @@ import {
 
 const AGENTS = [
   { id: 'antigravity', label: 'Antigravity', hint: 'Opens the project and its agent chat' },
+  { id: 'kilo', label: 'Kilo Code', hint: 'Kilo Code agent inside Antigravity IDE' },
   { id: 'claude', label: 'Claude', hint: 'Claude Code CLI, or the Claude app' },
   { id: 'vscode', label: 'VS Code', hint: 'VS Code agent chat' },
   { id: 'chatgpt', label: 'ChatGPT', hint: 'ChatGPT in your browser (no file access)' },

@@ -4,8 +4,9 @@ scripts/check_env.py - AUTOMATA local environment readiness check.
 Owns:    Developer-facing validation for local .env setup before starting
          backend services or applying the database schema.
 Never:   Prints secret values or writes credentials anywhere.
-Ref:     SETUP.md section 3, TECH_STACK.md "Environment variables",
-         SKILLS.md section 8.
+Ref:     docs/DEVELOPMENT.md (configuration), docs/TECH_STACK.md.
+         For a full health check of a running agent use Setup & health
+         in the app, or GET /system/self-check.
 """
 
 from __future__ import annotations

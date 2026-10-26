@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 
-class IntentType(str, Enum):
+class IntentType(str, Enum):  # noqa: UP042 — StrEnum would change str() output
     OPEN_PROJECT = "open_project"
     RESUME_PROJECT = "resume_project"
     MORNING_BRIEF = "morning_brief"
@@ -74,7 +74,7 @@ class IntentParser:
     """
 
     # (IntentType, compiled_pattern)
-    _AGENT_APPS = r"(antigravity|claude(?:\s+code)?|cursor|vs\s*code|vscode|chatgpt|chat\s*gpt)"
+    _AGENT_APPS = r"(kilo(?:\s*code)?|antigravity|claude(?:\s+code)?|cursor|vs\s*code|vscode|chatgpt|chat\s*gpt)"
     _WORK_VERBS = r"(?:build|create|make|implement|develop|fix|add|write|refactor|design|generate|set\s*up|scaffold)"
 
     _patterns = [
@@ -83,7 +83,8 @@ class IntentParser:
         (
             IntentType.DELEGATE_TASK,
             re.compile(
-                r"\b(?:using|use|with|in|via|through|ask|tell|get)\s+" + _AGENT_APPS + r"\b.*?\b" + _WORK_VERBS + r"\b",
+                r"\b(?:using|use|with|in|via|through|ask|tell|get|open|launch|start)\s+" + _AGENT_APPS
+                + r"\b.*?\b" + _WORK_VERBS + r"\b",
                 re.IGNORECASE,
             ),
         ),
@@ -446,7 +447,11 @@ class IntentParser:
                     target = text
                 elif intent == IntentType.DELEGATE_TASK:
                     app_name = re.sub(r"\s+", "", (m.group(1) or "").lower()).replace("claudecode", "claude")
-                    app_name = {"vscode": "vscode", "chatgpt": "chatgpt"}.get(app_name, app_name)
+                    app_name = {"kilocode": "kilo"}.get(app_name, app_name)
+                    # "open antigravity and use kilo code to …": Kilo is the agent,
+                    # Antigravity IDE is where it runs.
+                    if re.search(r"\bkilo\b", text, re.IGNORECASE):
+                        app_name = "kilo"
                     target = text
                     prompt_text = text
                 elif intent == IntentType.TYPE_TEXT:
